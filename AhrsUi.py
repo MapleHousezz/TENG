@@ -12,94 +12,139 @@
 
 import struct
 import serial
+import serial.tools.list_ports
 import tkinter as tk
+import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
+from collections import deque
 
-# 解析数据
-def parse_data(data):
-    # 解析Pitch
-    pitch = struct.unpack('>h', data[6:8])[0] * (360.0 / 65536.0)
-
-    # 解析Roll
-    roll = struct.unpack('>h', data[8:10])[0] * (360.0 / 65536.0)
-
-    # 解析Yaw
-    yaw = struct.unpack('>h', data[10:12])[0] * (360.0 / 65536.0)
-
-    return pitch, roll, yaw
-
-# 打开串口
-ser = serial.Serial('COM13', 115200, timeout=1)  # 请根据实际情况修改串口设备和波特率
-
-# 创建一个新的Tkinter窗口
-root = tk.Tk()
-root.title("IMU")
-
-# 创建一个新的matplotlib图形
-fig = plt.figure(num="IMU数据UI")
-
-# 创建三个空的列表来存储数据
-pitch_data = []
-roll_data = []
-yaw_data = []
-
-# 创建一个动画函数
-def animate(i):
-    while True:
-        # 读取一个字节的数据
-        data = ser.read(1)
-        if data == b'\x55':
-            # 读取接下来的两个字节
-            data += ser.read(2)
-            if data == b'\x55\xAA\xDC':
-                # 读取剩余的数据
-                data += ser.read(11)
-                if len(data) == 14:
-                    pitch, roll, yaw = parse_data(data)
-                    
-                    # 添加数据到列表
-                    pitch_data.append(pitch)
-                    roll_data.append(roll)
-                    yaw_data.append(yaw)
-
-                    # 当数据的长度超过200时，把最旧的数据去掉
-                    if len(pitch_data) > 200:
-                        del pitch_data[0]
-                    if len(roll_data) > 200:
-                        del roll_data[0]
-                    if len(yaw_data) > 200:
-                        del yaw_data[0]
-                    
-                    # 清除当前的图形
-                    plt.cla()
-                    
-                    # 绘制新的图形
-                    plt.plot(pitch_data, label='Pitch')
-                    plt.plot(roll_data, label='Roll')
-                    plt.plot(yaw_data, label='Yaw')
-                    
-                    # 添加图例
-                    plt.legend(loc='upper left')
-                    # 设置标题
-                    plt.title('IMU Data')
-                    plt.tight_layout()
-
-                    break
-                else:
-                    print('Invalid data:', data)
-                break
+class AhrsUI:
+    def __init__(self):
+        # 创建主窗口
+        self.root = tk.Tk()
+        self.root.title("IMU Data Viewer")
         
+        # 设置窗口最小尺寸
+        self.root.minsize(600, 400)
+        
+        # 创建框架来容纳图表
+        self.frame = tk.Frame(self.root)
+        self.frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建图形
+        self.fig, self.ax = plt.subplots(figsize=(6, 4))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.frame)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # 配置图表自适应布局
+        self.fig.tight_layout()
+        
+        # 绑定窗口调整大小事件
+        self.frame.bind('<Configure>', self.on_resize)
+        
+        # 使用deque存储数据，限制最大长度
+        max_points = 200
+        self.pitch_data = deque(maxlen=max_points)
+        self.roll_data = deque(maxlen=max_points)
+        self.yaw_data = deque(maxlen=max_points)
+        
+        # 初始化图表线条
+        self.x_data = np.arange(max_points)
+        self.lines = []
+        self.lines.append(self.ax.plot([], [], label='Pitch')[0])
+        self.lines.append(self.ax.plot([], [], label='Roll')[0])
+        self.lines.append(self.ax.plot([], [], label='Yaw')[0])
+        
+        # 设置图表
+        self.ax.set_xlim(0, max_points)
+        self.ax.set_ylim(-180, 180)
+        self.ax.legend(loc='upper left')
+        self.ax.set_title('IMU Data')
+        self.ax.grid(True)
+        
+        # 尝试打开串口
+        self.setup_serial()
+        
+        # 设置动画，降低更新频率
+        self.ani = animation.FuncAnimation(
+            self.fig, self.update_plot, interval=50,  # 增加间隔到50ms
+            blit=True)  # 使用blitting提高性能
 
-# 创建一个新的动画
-ani = animation.FuncAnimation(fig, animate, interval=10)
+    def setup_serial(self):
+        ports = serial.tools.list_ports.comports()
+        if not ports:
+            print("没有找到可用的串口!")
+            return
+        
+        print("可用串口:")
+        for port in ports:
+            print(f"- {port.device}")
+        
+        try:
+            self.ser = serial.Serial(ports[0].device, 115200, timeout=0.1)
+            print(f"成功打开串口: {ports[0].device}")
+        except serial.SerialException as e:
+            print(f"打开串口失败: {e}")
+            self.ser = None
 
-# 显示图形
-plt.show()
+    def parse_data(self, data):
+        pitch = struct.unpack('>h', data[6:8])[0] * (360.0 / 65536.0)
+        roll = struct.unpack('>h', data[8:10])[0] * (360.0 / 65536.0)
+        yaw = struct.unpack('>h', data[10:12])[0] * (360.0 / 65536.0)
+        return pitch, roll, yaw
 
-# 主循环
-root.mainloop()
+    def update_plot(self, frame):
+        if not hasattr(self, 'ser') or self.ser is None:
+            return self.lines
+        
+        try:
+            # 读取所有可用数据
+            while self.ser.in_waiting:
+                data = self.ser.read(1)
+                if data == b'\x55':
+                    data += self.ser.read(2)
+                    if data == b'\x55\xAA\xDC':
+                        data += self.ser.read(11)
+                        if len(data) == 14:
+                            pitch, roll, yaw = self.parse_data(data)
+                            
+                            # 更新数据
+                            self.pitch_data.append(pitch)
+                            self.roll_data.append(roll)
+                            self.yaw_data.append(yaw)
+                            
+                            # 更新线条数据
+                            y_datas = [self.pitch_data, self.roll_data, self.yaw_data]
+                            for line, y_data in zip(self.lines, y_datas):
+                                line.set_data(range(len(y_data)), y_data)
+        
+        except serial.SerialException as e:
+            print(f"串口读取错误: {e}")
+            self.ser = None
+        
+        return self.lines
 
-# 关闭串口
-ser.close()
+    def run(self):
+        self.root.mainloop()
 
+    def cleanup(self):
+        if hasattr(self, 'ser') and self.ser is not None:
+            self.ser.close()
+
+    def on_resize(self, event):
+        # 当窗口大小改变时调整图表大小
+        width = event.width / 100  # 将像素转换为英寸（近似值）
+        height = event.height / 100
+        self.fig.set_size_inches(width, height)
+        # 更新布局
+        self.fig.tight_layout()
+        self.canvas.draw()
+
+if __name__ == "__main__":
+    app = AhrsUI()
+    try:
+        app.run()
+    finally:
+        app.cleanup()
