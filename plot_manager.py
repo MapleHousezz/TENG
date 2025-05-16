@@ -11,7 +11,10 @@ from PyQt5.QtCore import QTimer, QObject, pyqtSignal # Import QTimer, QObject, p
 from PyQt5.QtWidgets import QMessageBox, QFileDialog # Import QMessageBox, QFileDialog
 
 class PlotManager(QObject): # Inherit from QObject to use signals/slots
-    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, max_data_points, test_data_button, status_bar, test_data_timer):
+    # Define a signal to update the pixel map
+    update_pixel_map_signal = pyqtSignal(int, int) # Signal to send row and column of the touched pixel
+
+    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, max_data_points, test_data_button, status_bar, test_data_timer, pixel_labels): # Add pixel_labels parameter
         super().__init__() # Call QObject constructor
         self.plot_widgets = plot_widgets
         self.data_lines = data_lines
@@ -22,12 +25,21 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         self.test_data_button = test_data_button
         self.status_bar = status_bar
         self.test_data_timer = test_data_timer
+        self.pixel_labels = pixel_labels # Store the pixel_labels reference
         # Need references to flags/objects from MainWindow to check data source status
         self.is_generating_test_data = False # This will need to be updated from MainWindow
         self.serial_thread_running = False # This will need to be updated from MainWindow
 
+        # Define a threshold for detecting a touch signal
+        self.touch_threshold = 0.5 # This threshold may need to be adjusted based on sensor characteristics
+
     def update_plots(self, values):
-        # values 是一个包含8个浮点数的列表
+        # values 是一个包含8个浮点数的列表 (CH1-CH8)
+        # CH1-CH4 are row signals, CH5-CH8 are column signals
+        row_signals = values[:4] # CH1-CH4
+        col_signals = values[4:] # CH5-CH8
+
+        # Update plot data and voltage labels
         for i in range(8):
             voltage = values[i]
 
@@ -50,7 +62,24 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             if self.is_generating_test_data or self.serial_thread_running:
                 self.voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
 
-     # 其他与图表相关的方法将稍后移至此处
+        # --- Touch Point Detection and Pixel Map Update ---
+        touched_row = -1
+        touched_col = -1
+
+        # Find activated row
+        activated_rows = [i for i, signal in enumerate(row_signals) if signal > self.touch_threshold]
+        # Find activated column
+        activated_cols = [i for i, signal in enumerate(col_signals) if signal > self.touch_threshold]
+
+        # Determine touch point based on activated row and column
+        if len(activated_rows) == 1 and len(activated_cols) == 1:
+            touched_row = activated_rows[0]
+            touched_col = activated_cols[0]
+            # Emit signal to update pixel map
+            self.update_pixel_map_signal.emit(touched_row, touched_col)
+        else:
+            # No touch or multiple touches (clear pixel map)
+            self.update_pixel_map_signal.emit(-1, -1) # Use -1 to indicate no touch
 
 
     def _generate_single_test_data_point(self):
@@ -61,18 +90,34 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         # 生成一组模拟数据
         test_values = []
         current_time = time.time() # Use current time for dynamic data
+
+        # Simulate a single touch point for testing
+        simulated_touch_row = random.randint(0, 3)
+        simulated_touch_col = random.randint(0, 3)
+
         for i in range(8):
-            # 生成一个0-3.3V范围内的正弦波形数据
-            value = 1.65 + 1.65 * math.sin(current_time + i * math.pi / 4 + (current_time * 2)) # Add current_time to make it dynamic
-            # 添加一些随机噪声
-            value += random.uniform(-0.1, 0.1)
-            # 确保值在0-3.3V范围内
+            if i < 4: # Row signals (CH1-CH4)
+                if i == simulated_touch_row:
+                    # Simulate a peak for the touched row
+                    value = 2.5 + random.uniform(-0.2, 0.2) # Signal above threshold
+                else:
+                    # Simulate background noise for other rows
+                    value = random.uniform(0.1, 0.3) # Signal below threshold
+            else: # Column signals (CH5-CH8)
+                if (i - 4) == simulated_touch_col:
+                     # Simulate a peak for the touched column
+                    value = 2.5 + random.uniform(-0.2, 0.2) # Signal above threshold
+                else:
+                    # Simulate background noise for other columns
+                    value = random.uniform(0.1, 0.3) # Signal below threshold
+
+            # Ensure value is within 0-3.3V range
             value = max(0, min(3.3, value))
             test_values.append(value)
 
-        # 更新图表
+        # 更新图表和像素映射
         self.update_plots(test_values)
-        # self.status_bar.showMessage("已生成测试数据") # 状态栏更新可在切换函数中处理
+
 
     def toggle_test_data_generation(self):
         if not self.is_generating_test_data:
@@ -96,8 +141,8 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             if hasattr(self, 'original_sample_interval_s'):
                 self.sample_interval_s = self.original_sample_interval_s
             self.status_bar.showMessage("测试数据采集已停止")
-
-
+            # Clear the pixel map when stopping test data generation
+            self.update_pixel_map_signal.emit(-1, -1)
 
 
     def export_data_to_csv(self):
@@ -199,7 +244,7 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
                         for ch_idx in range(8):
                             ch_x_data = self.data_lines[ch_idx].xData
                             ch_y_data = self.data_lines[ch_idx].yData
-                            
+
                             if ch_x_data is not None and len(ch_x_data) > 0:
                                 # Find closest data point in this channel to actual_x_time
                                 ch_min_dist = float('inf')
@@ -209,11 +254,11 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
                                     if dist_in_ch < ch_min_dist:
                                         ch_min_dist = dist_in_ch
                                         ch_closest_idx = idx_in_ch
- 
+
                                 # Check if the found point is reasonably close (e.g., within a sample interval)
                                 if ch_closest_idx != -1 and ch_min_dist < self.sample_interval_s * 1.5: # Allow small tolerance
                                     voltage_strings[ch_idx] = f"{ch_y_data[ch_closest_idx]:.3f} V"
- 
+
                         # Update all voltage labels after finding closest points for all channels
                         for ch_idx in range(8):
                              self.voltage_labels[ch_idx].setText(f"CH{ch_idx+1}: {voltage_strings[ch_idx]}")
@@ -222,7 +267,7 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
                         # self.voltage_labels[plot_index].setText(f"CH{plot_index+1}: {actual_y_voltage:.3f} V")
                         # The update_plots method already handles this for active data generation.
                         pass # Voltage labels are updated by update_plots during active data generation
- 
+
                     # Remove on-plot hover text display
                     plot_widget.hover_text_item.hide()
                 else:
@@ -254,6 +299,9 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         # self._reset_plot_views() # 可调用此方法重置缩放/平移
         # 状态栏更新需要在MainWindow中处理
         # self.status_bar.showMessage("图表数据已清空")
+        # Clear the pixel map when clearing data
+        self.update_pixel_map_signal.emit(-1, -1)
+
 
     def _reset_plot_views(self):
         if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x: # Prevent issues if called during an ongoing sync

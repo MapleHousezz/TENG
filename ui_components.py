@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QComboBox, QStatusBar, QMenuBar, QMenu, QAction, QMessageBox, QFileDialog
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QComboBox, QStatusBar, QMenuBar, QMenu, QAction, QMessageBox, QFileDialog, QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import pyqtgraph as pg
@@ -207,7 +207,6 @@ def create_data_display_area(parent):
     hover_texts = []
 
     for i in range(8):
-        # 4行2列布局：左边通道1-4 (i=0..3)，右边通道5-8 (i=4..7)
         if i < 4:
             row = i
             col = 0
@@ -223,19 +222,17 @@ def create_data_display_area(parent):
         plot_widget.setBackground('w')
         plot_widget.setTitle(f"CH{i+1}" if i < 4 else f"CH{i+1}")
         plot_widget.setLabel('left', '电压 (V)', color='#000000', size='12pt')
-        plot_widget.setLabel('bottom', '时间 (s)', color='#000000', size='12pt') # Changed label
-        plot_widget.showGrid(x=False, y=False)  # 移除栅格线
-        plot_widget.setYRange(0, 3.3) # 电压范围 0-3.3V
-        plot_widget.getViewBox().setMouseEnabled(y=False) # 禁用Y轴缩放
-        plot_widget.getViewBox().setLimits(yMin=0, yMax=3.3, xMin=0) # Added xMin=0 limit
+        plot_widget.setLabel('bottom', '时间 (s)', color='#000000', size='12pt') 
+        plot_widget.showGrid(x=False, y=False)  
+        plot_widget.setYRange(0, 3.3) 
+        plot_widget.getViewBox().setMouseEnabled(y=False) 
+        plot_widget.getViewBox().setLimits(yMin=0, yMax=3.3, xMin=0) 
 
-        # 设置坐标轴刻度颜色
         plot_widget.getAxis('left').setPen(color='#000000')
         plot_widget.getAxis('bottom').setPen(color='#000000')
         plot_widget.getAxis('left').setTextPen(color='#000000')
         plot_widget.getAxis('bottom').setTextPen(color='#000000')
 
-        # 只在底部图表显示X轴标签
         if (i < 3) or (i > 3 and i < 7):
             plot_widget.getAxis('bottom').setStyle(showValues=False)
             plot_widget.getAxis('bottom').setLabel('')
@@ -243,23 +240,14 @@ def create_data_display_area(parent):
         plot_widgets.append(plot_widget)
         plot_layout.addWidget(plot_widget)
 
-        # Connect sigXRangeChanged for synchronization (This connection needs to be in MainWindow)
-        # plot_widget.getViewBox().sigXRangeChanged.connect(parent._synchronize_x_ranges)
-
-        # 创建用于显示悬停信息的TextItem
         hover_text = pg.TextItem(anchor=(0,1))
         plot_widget.addItem(hover_text)
         hover_text.hide()
-        # 将hover_text与plot_widget关联，方便后续查找
         plot_widget.hover_text_item = hover_text
         hover_texts.append(hover_text)
 
-        # 连接鼠标移动事件 (This connection needs to be in MainWindow)
-        # plot_widget.scene().sigMouseMoved.connect(lambda pos, pw=plot_widget, idx=i: parent._mouse_moved_on_plot(pos, pw, idx))
-
         data_display_layout.addWidget(plot_widget_container, row, col)
 
-        # 初始化数据线
         data_line = plot_widget.plot([], [], pen=pg.mkPen(color=(i*30 % 255, i*50 % 255, i*70 % 255), width=2))
         data_lines.append(data_line)
 
@@ -278,7 +266,6 @@ def create_menu_bar(parent):
     exit_action.triggered.connect(parent.close)
     file_menu.addAction(exit_action)
 
-    # Add About action
     about_action = QAction("关于", parent)
     file_menu.addAction(about_action)
 
@@ -290,6 +277,43 @@ def create_status_bar(parent):
     status_bar.showMessage("准备就绪")
     return status_bar
 
+def create_pixel_map_area():
+    pixel_map_widget = QWidget()
+    # Use QVBoxLayout to stack title and grid
+    main_pixel_layout = QVBoxLayout(pixel_map_widget)
+    main_pixel_layout.setSpacing(5)
+    main_pixel_layout.setContentsMargins(10, 10, 10, 10)
+
+    # Add title for the pixel map
+    pixel_map_title = QLabel("像素映射")
+    pixel_map_title.setFont(get_font(18, bold=True))
+    pixel_map_title.setAlignment(Qt.AlignCenter)
+    main_pixel_layout.addWidget(pixel_map_title)
+
+    # Create the grid layout for pixels
+    pixel_grid_layout = QGridLayout()
+    pixel_grid_layout.setSpacing(0)  # 设置像素点间距为0
+    pixel_grid_layout.setContentsMargins(0, 0, 0, 0)  # 设置外边距为0
+
+    pixel_labels = []
+    for row in range(4):
+        row_labels = []
+        for col in range(4):
+            label = QLabel()
+            label.setFixedSize(50, 50) # Set fixed size for each pixel label
+            label.setStyleSheet("background-color: lightgray; border: none;")
+            label.setAlignment(Qt.AlignCenter)
+            row_labels.append(label)
+            pixel_grid_layout.addWidget(label, row, col)
+        pixel_labels.append(row_labels)
+
+    # Add the grid layout to the main layout
+    main_pixel_layout.addLayout(pixel_grid_layout)
+    main_pixel_layout.addStretch() # Add stretch to push grid to top
+
+    pixel_map_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # 固定大小，防止被拉伸
+    return {'pixel_map_widget': pixel_map_widget, 'pixel_labels': pixel_labels}
+
 def populate_serial_ports(port_combo):
     ports = serial.tools.list_ports.comports()
     port_combo.clear()
@@ -297,6 +321,6 @@ def populate_serial_ports(port_combo):
         port_combo.addItem(port.device)
     if not ports:
         port_combo.addItem("无可用串口")
-        port_combo.setEnabled(False) # Disable combo box if no ports
+        port_combo.setEnabled(False) 
     else:
-        port_combo.setEnabled(True) # Enable combo box if ports are found
+        port_combo.setEnabled(True)

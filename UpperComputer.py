@@ -9,7 +9,7 @@ import struct
 import time
 import csv
 import os # For path joining in export
-from ui_components import create_control_panel, create_data_display_area, create_menu_bar, create_status_bar
+from ui_components import create_control_panel, create_data_display_area, create_menu_bar, create_status_bar, create_pixel_map_area # Import create_pixel_map_area
 from plot_manager import PlotManager
 from serial_manager import SerialManager
 
@@ -43,7 +43,8 @@ class MainWindow(QMainWindow):
             self.max_data_points,
             self.test_data_button,
             self.status_bar,
-            self.test_data_timer
+            self.test_data_timer,
+            self.pixel_labels # Pass pixel_labels to PlotManager
         )
 
         # Create SerialManager instance
@@ -62,6 +63,9 @@ class MainWindow(QMainWindow):
         # Connect SerialManager signals
         self.serial_manager.status_changed.connect(self.update_status_bar)
         self.serial_manager.data_received.connect(self.plot_manager.update_plots)
+
+        # Connect PlotManager signal to update pixel map
+        self.plot_manager.update_pixel_map_signal.connect(self.update_pixel_map)
 
         # Call populate_serial_ports from SerialManager
         self.serial_manager.populate_serial_ports()
@@ -85,20 +89,22 @@ class MainWindow(QMainWindow):
         # Connect menu actions
         self.about_action.triggered.connect(self.show_about_dialog)
 
+        # Ensure default display of pixel map
+        self.update_pixel_map(-1, -1)
 
     def _init_ui(self):
          # --- Central Widget and Layout --- #
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
- 
-         # Set window icon
+
+        # Set window icon
         icon_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'icon.ico')
         self.setWindowIcon(QIcon(icon_path))
 
         # --- Left Control Panel --- #
         control_components = create_control_panel(self)
-        main_layout.addWidget(control_components['control_panel'])
+        main_layout.addWidget(control_components['control_panel'], 0) # Control panel fixed width
 
         # Assign control panel components to instance attributes
         self.voltage_labels = control_components['voltage_labels']
@@ -117,14 +123,22 @@ class MainWindow(QMainWindow):
         self.clear_data_button = control_components['clear_data_button']
         self.export_data_button = control_components['export_data_button']
 
-        # --- Right Data Display Area --- #
+        # --- Data Display Area --- #
         data_display_components = create_data_display_area(self)
-        main_layout.addWidget(data_display_components['data_display_area'], 1)
+        main_layout.addWidget(data_display_components['data_display_area'], 3) # Plots take more space
 
         # Assign data display components to instance attributes
         self.plot_widgets = data_display_components['plot_widgets']
         self.data_lines = data_display_components['data_lines']
         self.hover_texts = data_display_components['hover_texts']
+
+        # --- Pixel Map --- #
+        pixel_map_components = create_pixel_map_area()
+        main_layout.addWidget(pixel_map_components['pixel_map_widget'], 1) # Pixel map takes less space
+
+        # Assign pixel map components to instance attributes
+        self.pixel_labels = pixel_map_components['pixel_labels']
+
 
         # --- Menu Bar --- #
         menu_actions = create_menu_bar(self)
@@ -134,6 +148,16 @@ class MainWindow(QMainWindow):
         # --- Status Bar --- #
         self.status_bar = create_status_bar(self)
 
+    def update_pixel_map(self, row, col):
+        """Updates the pixel map display based on the touched row and column."""
+        # Reset all pixels to default style
+        for r in range(4):
+            for c in range(4):
+                self.pixel_labels[r][c].setStyleSheet("background-color: lightgray; border: none;")
+        
+        # Highlight the touched pixel if a valid touch is detected
+        if 0 <= row < 4 and 0 <= col < 4:
+            self.pixel_labels[row][col].setStyleSheet("background-color: lightblue; border: none;")
 
     def _create_mouse_moved_slot(self, plot_widget, plot_index):
         def mouse_moved_slot(pos):
@@ -142,7 +166,6 @@ class MainWindow(QMainWindow):
 
     def update_status_bar(self, message):
         self.status_bar.showMessage(message)
-
 
     def show_about_dialog(self):
         QMessageBox.about(self, "关于", "PyQt 上位机软件\n版本 1.0\n作者: Trae AI")
