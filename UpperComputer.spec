@@ -5,7 +5,7 @@ block_cipher = None
 
 
 a = Analysis(
-    ['c:\\Users\\GQL\\Desktop\\PyQt\\UpperComputer.py'],
+    ['UpperComputer.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -41,4 +41,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['icon.ico'],
 )
