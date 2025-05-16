@@ -29,7 +29,6 @@ class MainWindow(QMainWindow):
         self.sample_interval_s = 0.001 # 采样间隔，秒 (对应1ms)
 
         self.test_data_timer = QTimer(self) # 新增测试数据定时器
-        self.is_generating_test_data = False # 新增测试数据生成状态标志
 
         self._init_ui()
 
@@ -44,7 +43,10 @@ class MainWindow(QMainWindow):
             self.test_data_button,
             self.status_bar,
             self.test_data_timer,
-            self.pixel_labels # Pass pixel_labels to PlotManager
+            self.pixel_labels, # Pass pixel_labels to PlotManager
+            self.frequency_spinbox, # Pass frequency spinbox
+            self.points_spinbox, # Pass points spinbox
+            self.digital_matrix_labels # Pass digital matrix labels
         )
 
         # Create SerialManager instance
@@ -66,15 +68,21 @@ class MainWindow(QMainWindow):
 
         # Connect PlotManager signal to update pixel map
         self.plot_manager.update_pixel_map_signal.connect(self.update_pixel_map)
+        # Connect signal to update digital matrix
+        self.plot_manager.update_digital_matrix_signal.connect(self.update_digital_matrix)
+
 
         # Call populate_serial_ports from SerialManager
         self.serial_manager.populate_serial_ports()
 
-        # Connect signals from plot widgets (moved from create_data_display_area)之前
+        # Link X-axes of all plot widgets to the first one for synchronization
+        if self.plot_widgets:
+            first_view_box = self.plot_widgets[0].getViewBox()
+            for i in range(1, len(self.plot_widgets)):
+                self.plot_widgets[i].getViewBox().setXLink(first_view_box)
+
+        # Connect mouse moved signal using a dedicated slot creator
         for plot_widget in self.plot_widgets:
-             plot_widget.getViewBox().sigXRangeChanged.connect(self.plot_manager._synchronize_x_ranges)
-             # plot_widget.scene().sigMouseMoved.connect(lambda pos, pw=plot_widget, idx=self.plot_widgets.index(plot_widget): self.plot_manager._mouse_moved_on_plot(pos, pw, idx))
-             # Connect mouse moved signal using a dedicated slot creator
              plot_index = self.plot_widgets.index(plot_widget)
              plot_widget.scene().sigMouseMoved.connect(self._create_mouse_moved_slot(plot_widget, plot_index))
 
@@ -91,6 +99,7 @@ class MainWindow(QMainWindow):
 
         # Ensure default display of pixel map
         self.update_pixel_map(-1, -1)
+
 
     def _init_ui(self):
          # --- Central Widget and Layout --- #
@@ -122,6 +131,8 @@ class MainWindow(QMainWindow):
         self.reset_view_button = control_components['reset_view_button']
         self.clear_data_button = control_components['clear_data_button']
         self.export_data_button = control_components['export_data_button']
+        self.frequency_spinbox = control_components['frequency_spinbox'] # Get frequency spinbox
+        self.points_spinbox = control_components['points_spinbox'] # Get points spinbox
 
         # --- Data Display Area --- #
         data_display_components = create_data_display_area(self)
@@ -133,11 +144,13 @@ class MainWindow(QMainWindow):
         self.hover_texts = data_display_components['hover_texts']
 
         # --- Pixel Map --- #
-        pixel_map_components = create_pixel_map_area()
+        pixel_map_components = create_pixel_map_area(self)
         main_layout.addWidget(pixel_map_components['pixel_map_widget'], 1) # Pixel map takes less space
 
         # Assign pixel map components to instance attributes
         self.pixel_labels = pixel_map_components['pixel_labels']
+        self.clear_map_button = pixel_map_components['clear_map_button'] # Get clear map button
+        self.digital_matrix_labels = pixel_map_components['digital_matrix_labels'] # Get digital matrix labels
 
 
         # --- Menu Bar --- #
@@ -148,16 +161,34 @@ class MainWindow(QMainWindow):
         # --- Status Bar --- #
         self.status_bar = create_status_bar(self)
 
+        # Connect clear map button signal
+        self.clear_map_button.clicked.connect(self.clear_pixel_map)
+
     def update_pixel_map(self, row, col):
         """Updates the pixel map display based on the touched row and column."""
-        # Reset all pixels to default style
-        for r in range(4):
-            for c in range(4):
-                self.pixel_labels[r][c].setStyleSheet("background-color: lightgray; border: none;")
-        
-        # Highlight the touched pixel if a valid touch is detected
+        # Only highlight the touched pixel if a valid touch is detected
         if 0 <= row < 4 and 0 <= col < 4:
+            # Reset previous highlighted pixel if any (optional, depends on desired behavior)
+            # For now, we'll just highlight the new one.
             self.pixel_labels[row][col].setStyleSheet("background-color: lightblue; border: none;")
+        elif row == -1 and col == -1:
+            # Clear all pixels if -1, -1 is received
+            self.clear_pixel_map()
+
+
+    def clear_pixel_map(self):
+        """Clears the pixel map display and digital matrix."""
+        for row in range(4):
+            for col in range(4):
+                self.pixel_labels[row][col].setStyleSheet("background-color: lightgray; border: none;")
+                self.digital_matrix_labels[row][col].setText("0.000") # Clear digital matrix
+
+
+    def update_digital_matrix(self, row, col, time_s):
+        """Updates the digital matrix display with the touch time."""
+        if 0 <= row < 4 and 0 <= col < 4:
+            self.digital_matrix_labels[row][col].setText(f"{time_s:.3f}")
+
 
     def _create_mouse_moved_slot(self, plot_widget, plot_index):
         def mouse_moved_slot(pos):
@@ -168,7 +199,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(message)
 
     def show_about_dialog(self):
-        QMessageBox.about(self, "关于", "PyQt 上位机软件\n版本 1.0\n作者: Trae AI")
+        QMessageBox.about(self, "关于", "PyQt 上位机软件\n版本 1.0\n作者: GQL")
 
     def closeEvent(self, event):
         self.serial_manager.disconnect_serial() #确保关闭时断开串口

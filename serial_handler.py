@@ -20,6 +20,7 @@ class SerialThread(QThread):
         self.running = False
         self.data_frame_tail = bytes([0x00, 0x00, 0x80, 0x7f])
         self.buffer = bytearray()
+        self.start_time = None # Add start_time attribute
 
     def run(self):
         try:
@@ -34,6 +35,7 @@ class SerialThread(QThread):
                 xonxoff=self.flowcontrol == 'XON/XOFF'
             )
             self.running = True
+            self.start_time = time.time() # Record start time when connected
             self.status_changed.emit(f"已连接到 {self.port} @ {self.baudrate}")
             print(f"Serial port {self.port} opened successfully.")
 
@@ -68,7 +70,11 @@ class SerialThread(QThread):
                         value = struct.unpack('>f', value_bytes)[0]
                         values.append(value)
                     
-                    self.data_received.emit(values)
+                    current_time = time.time()
+                    if self.start_time is None:
+                        self.start_time = current_time
+                    relative_time = current_time - self.start_time # Calculate relative time
+                    self.data_received.emit([values, relative_time]) # Emit relative time
                     self.buffer = self.buffer[tail_index + len(self.data_frame_tail):]
                 else:
                     self.buffer = self.buffer[tail_index + len(self.data_frame_tail):]

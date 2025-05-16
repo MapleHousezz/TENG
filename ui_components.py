@@ -1,8 +1,9 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QComboBox, QStatusBar, QMenuBar, QMenu, QAction, QMessageBox, QFileDialog, QSizePolicy
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QComboBox, QSpinBox, QStatusBar, QMenuBar, QMenu, QAction, QMessageBox, QFileDialog, QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 import pyqtgraph as pg
 import serial.tools.list_ports # Needed for populate_serial_ports
+import datetime # Import datetime
 
 # Helper function to get font
 def get_font(point_size, bold=False):
@@ -42,6 +43,30 @@ def create_control_panel(parent):
     # --- 协议与连接 ---
     protocol_connection_label = QLabel("协议与连接")
     protocol_connection_label.setFont(get_font(18, bold=True))
+    test_data_control_label = QLabel("测试数据控制")
+    test_data_control_label.setFont(get_font(18, bold=True))
+    control_layout.addWidget(test_data_control_label)
+
+    frequency_label = QLabel("频率 (Hz)") # Change label to Hz
+    frequency_label.setFont(label_font)
+    frequency_spinbox = QSpinBox()
+    frequency_spinbox.setRange(1, 1000) # Keep range for now, assuming up to 1000Hz is possible
+    frequency_spinbox.setValue(1) # Default to 1 Hz
+    frequency_spinbox.setFont(label_font)
+    frequency_spinbox.setMinimumHeight(40)
+    control_layout.addWidget(frequency_label)
+    control_layout.addWidget(frequency_spinbox)
+
+    points_label = QLabel("点数")
+    points_label.setFont(label_font)
+    points_spinbox = QSpinBox()
+    points_spinbox.setRange(1, 100)
+    points_spinbox.setValue(10)
+    points_spinbox.setFont(label_font)
+    points_spinbox.setMinimumHeight(40)
+    control_layout.addWidget(points_label)
+    control_layout.addWidget(points_spinbox)
+
     control_layout.addWidget(protocol_connection_label)
 
     # --- 数据引擎 ---
@@ -195,7 +220,9 @@ def create_control_panel(parent):
         'test_data_button': test_data_button,
         'reset_view_button': reset_view_button,
         'clear_data_button': clear_data_button,
-        'export_data_button': export_data_button
+        'export_data_button': export_data_button,
+        'frequency_spinbox': frequency_spinbox, # Add frequency spinbox
+        'points_spinbox': points_spinbox # Add points spinbox
     }
 
 def create_data_display_area(parent):
@@ -222,11 +249,11 @@ def create_data_display_area(parent):
         plot_widget.setBackground('w')
         plot_widget.setTitle(f"CH{i+1}" if i < 4 else f"CH{i+1}")
         plot_widget.setLabel('left', '电压 (V)', color='#000000', size='12pt')
-        plot_widget.setLabel('bottom', '时间 (s)', color='#000000', size='12pt') 
-        plot_widget.showGrid(x=False, y=False)  
-        plot_widget.setYRange(0, 3.3) 
-        plot_widget.getViewBox().setMouseEnabled(y=False) 
-        plot_widget.getViewBox().setLimits(yMin=0, yMax=3.3, xMin=0) 
+        plot_widget.setLabel('bottom', '时间 (s)', color='#000000', size='12pt')
+        plot_widget.showGrid(x=False, y=False)
+        plot_widget.setYRange(0, 3.3)
+        plot_widget.getViewBox().setMouseEnabled(y=False)
+        plot_widget.getViewBox().setLimits(yMin=0, yMax=3.3, xMin=0)
 
         plot_widget.getAxis('left').setPen(color='#000000')
         plot_widget.getAxis('bottom').setPen(color='#000000')
@@ -247,6 +274,13 @@ def create_data_display_area(parent):
         hover_texts.append(hover_text)
 
         data_display_layout.addWidget(plot_widget_container, row, col)
+
+        # Link all plots to first plot's X axis and connect signals
+        if i > 0:
+            plot_widget.setXLink(plot_widgets[0])
+            # Connect view range changed signal to synchronize all plots
+            plot_widget.getViewBox().sigXRangeChanged.connect(
+                lambda vb, rng, idx=i: parent.plot_manager._synchronize_x_ranges(vb, rng))
 
         data_line = plot_widget.plot([], [], pen=pg.mkPen(color=(i*30 % 255, i*50 % 255, i*70 % 255), width=2))
         data_lines.append(data_line)
@@ -270,14 +304,13 @@ def create_menu_bar(parent):
     file_menu.addAction(about_action)
 
     return {'exit_action': exit_action, 'about_action': about_action}
-
 def create_status_bar(parent):
     status_bar = QStatusBar()
     parent.setStatusBar(status_bar)
     status_bar.showMessage("准备就绪")
     return status_bar
 
-def create_pixel_map_area():
+def create_pixel_map_area(parent):
     pixel_map_widget = QWidget()
     # Use QVBoxLayout to stack title and grid
     main_pixel_layout = QVBoxLayout(pixel_map_widget)
@@ -291,28 +324,97 @@ def create_pixel_map_area():
     main_pixel_layout.addWidget(pixel_map_title)
 
     # Create the grid layout for pixels
-    pixel_grid_layout = QGridLayout()
-    pixel_grid_layout.setSpacing(0)  # 设置像素点间距为0
-    pixel_grid_layout.setContentsMargins(0, 0, 0, 0)  # 设置外边距为0
+    pixel_map_layout = QGridLayout() # <-- Changed
+    pixel_map_layout.setSpacing(1) # Reduce spacing between pixels
+    pixel_map_layout.setContentsMargins(0, 0, 0, 0) # Remove margins
 
     pixel_labels = []
     for row in range(4):
         row_labels = []
         for col in range(4):
             label = QLabel()
-            label.setFixedSize(50, 50) # Set fixed size for each pixel label
             label.setStyleSheet("background-color: lightgray; border: none;")
             label.setAlignment(Qt.AlignCenter)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) # Set size policy to expanding
+            pixel_map_layout.addWidget(label, row, col)
             row_labels.append(label)
-            pixel_grid_layout.addWidget(label, row, col)
         pixel_labels.append(row_labels)
 
-    # Add the grid layout to the main layout
-    main_pixel_layout.addLayout(pixel_grid_layout)
+    # Set equal stretch factors for rows and columns
+    for i in range(4):
+        pixel_map_layout.setRowStretch(i, 1)
+        pixel_map_layout.setColumnStretch(i, 1)
+
+    # Add the pixel grid layout to the main QVBoxLayout
+    main_pixel_layout.addLayout(pixel_map_layout) # <-- Added
+
+    # --- Digital Matrix Display ---
+    digital_matrix_title = QLabel("触摸时间 (s)")
+    digital_matrix_title.setFont(get_font(18, bold=True))
+    digital_matrix_title.setAlignment(Qt.AlignCenter)
+    main_pixel_layout.addWidget(digital_matrix_title)
+
+    digital_matrix_layout = QGridLayout()
+    digital_matrix_layout.setSpacing(5)
+    digital_matrix_layout.setContentsMargins(0, 0, 0, 0)
+
+    digital_matrix_labels = []
+    for row in range(4):
+        row_labels = []
+        for col in range(4):
+            label = QLabel("0.000") # Default text
+            label.setFixedSize(60, 30) # Adjust size as needed
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet("border: 1px solid black;") # Add border for visibility
+            label.setFont(get_font(10)) # Smaller font for numbers
+            row_labels.append(label)
+            digital_matrix_layout.addWidget(label, row, col)
+        digital_matrix_labels.append(row_labels)
+
+    main_pixel_layout.addLayout(digital_matrix_layout)
+
+
+    # Add export button
+    export_button = QPushButton("导出二值图")
+    export_button.setFont(get_font(14))
+    export_button.setMinimumHeight(48)
+    export_button.clicked.connect(lambda: export_binary_image(pixel_labels))
+
+    clear_map_button = QPushButton("清空映射")
+    clear_map_button.setFont(get_font(14))
+    clear_map_button.setMinimumHeight(48)
+    clear_map_button.clicked.connect(lambda: parent.clear_pixel_map())
+
+    main_pixel_layout.addWidget(export_button)
+    main_pixel_layout.addWidget(clear_map_button)
     main_pixel_layout.addStretch() # Add stretch to push grid to top
 
-    pixel_map_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)  # 固定大小，防止被拉伸
-    return {'pixel_map_widget': pixel_map_widget, 'pixel_labels': pixel_labels}
+    def export_binary_image(pixel_labels):
+        from PIL import Image
+        import datetime # Import datetime
+
+        binary_image = Image.new('1', (4, 4))
+        pixels = binary_image.load()
+
+        for row in range(4):
+            for col in range(4):
+                # Check the background color to determine if the pixel is highlighted
+                color = pixel_labels[row][col].palette().color(pixel_labels[row][col].backgroundRole())
+                # Assuming lightblue is the highlighted color, check its RGB values
+                if color.red() == 173 and color.green() == 216 and color.blue() == 230: # RGB for lightblue
+                     pixels[col, row] = 0 # Black for highlighted
+                else:
+                     pixels[col, row] = 1 # White for not highlighted
+
+
+        # Generate filename with current date and time
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f'binary_image_{timestamp}.bmp'
+        binary_image.save(filename)
+        QMessageBox.information(parent, "导出成功", f"二值图已导出为 {filename}")
+
+    pixel_map_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许根据布局空间调整大小
+    return {'pixel_map_widget': pixel_map_widget, 'pixel_labels': pixel_labels, 'export_button': export_button, 'clear_map_button': clear_map_button, 'digital_matrix_labels': digital_matrix_labels} # Return clear button and digital matrix labels
 
 def populate_serial_ports(port_combo):
     ports = serial.tools.list_ports.comports()
@@ -321,6 +423,6 @@ def populate_serial_ports(port_combo):
         port_combo.addItem(port.device)
     if not ports:
         port_combo.addItem("无可用串口")
-        port_combo.setEnabled(False) 
+        port_combo.setEnabled(False)
     else:
         port_combo.setEnabled(True)

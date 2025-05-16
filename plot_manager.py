@@ -11,10 +11,11 @@ from PyQt5.QtCore import QTimer, QObject, pyqtSignal # Import QTimer, QObject, p
 from PyQt5.QtWidgets import QMessageBox, QFileDialog # Import QMessageBox, QFileDialog
 
 class PlotManager(QObject): # Inherit from QObject to use signals/slots
-    # Define a signal to update the pixel map
+    # Define signals
     update_pixel_map_signal = pyqtSignal(int, int) # Signal to send row and column of the touched pixel
+    update_digital_matrix_signal = pyqtSignal(int, int, float) # Signal to send row, col, and time
 
-    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, max_data_points, test_data_button, status_bar, test_data_timer, pixel_labels): # Add pixel_labels parameter
+    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, max_data_points, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # Add digital_matrix_labels parameter
         super().__init__() # Call QObject constructor
         self.plot_widgets = plot_widgets
         self.data_lines = data_lines
@@ -26,15 +27,40 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         self.status_bar = status_bar
         self.test_data_timer = test_data_timer
         self.pixel_labels = pixel_labels # Store the pixel_labels reference
+        self.frequency_spinbox = frequency_spinbox # Store frequency spinbox reference
+        self.points_spinbox = points_spinbox # Store points spinbox reference
+        self.digital_matrix_labels = digital_matrix_labels # Store digital matrix labels reference
+
+        self.is_synchronizing_x = False # Flag to prevent recursive X-axis sync
+        
+
+
+        # Test data generation control variables
+        self.is_generating_test_data = False
+        self.test_data_total_points = 0
+        self.test_data_frequency_hz = 1 # Default frequency in Hz
+        self.test_data_points = 4 # Default number of points
+
         # Need references to flags/objects from MainWindow to check data source status
-        self.is_generating_test_data = False # This will need to be updated from MainWindow
         self.serial_thread_running = False # This will need to be updated from MainWindow
 
         # Define a threshold for detecting a touch signal
         self.touch_threshold = 0.5 # This threshold may need to be adjusted based on sensor characteristics
 
-    def update_plots(self, values):
-        # values 是一个包含8个浮点数的列表 (CH1-CH8)
+        self.data_acquisition_start_time = None # Store the start time of data acquisition
+
+    def update_plots(self, data):
+        # data 是一个列表，包含 [values, current_time]
+        values = data[0] # values 是一个包含8个浮点数的列表 (CH1-CH8)
+        current_time_s = data[1] # current_time 是接收到数据时的真实时间戳
+
+        # Initialize start time if it's the first data point
+        if self.data_acquisition_start_time is None:
+            self.data_acquisition_start_time = current_time_s
+
+        # Calculate relative time
+        relative_time_s = current_time_s - self.data_acquisition_start_time
+
         # CH1-CH4 are row signals, CH5-CH8 are column signals
         row_signals = values[:4] # CH1-CH4
         col_signals = values[4:] # CH5-CH8
@@ -43,13 +69,7 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         for i in range(8):
             voltage = values[i]
 
-            # Determine the time for the current data point
-            if not self.data_queues[i]:
-                current_time_s = 0.0
-            else:
-                last_time_s = self.data_queues[i][-1][1]
-                current_time_s = last_time_s + self.sample_interval_s
-
+            # 使用计算出的相对时间
             self.data_queues[i].append((voltage, current_time_s))
             if len(self.data_queues[i]) > self.max_data_points:
                 self.data_queues[i].pop(0) # 移除最老的数据点
@@ -59,9 +79,34 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             plot_voltages = [item[0] for item in self.data_queues[i]]
             self.data_lines[i].setData(plot_times, plot_voltages)
             # Update voltage labels if data is actively being generated
-            if self.is_generating_test_data or self.serial_thread_running:
+            if self.is_generating_test_data or self.serial_thread_running: # Need to update serial_thread_running flag from MainWindow
                 self.voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
 
+        # Automatically adjust X-axis range for all plots if needed
+        if plot_times:
+            start_time = plot_times[0]
+            end_time = plot_times[-1]
+            
+            # Adjust X-axis range only if new data is outside current view
+            current_view_range = self.plot_widgets[0].getViewBox().viewRange()[0]
+            view_duration = current_view_range[1] - current_view_range[0]
+            
+            # Automatically adjust X-axis range for all plots if needed
+            # This automatic adjustment should only happen when new data arrives
+            # and the current view does not encompass the new data.
+            # Manual zooming/panning is handled by _synchronize_x_ranges.
+            current_view_range = self.plot_widgets[0].getViewBox().viewRange()[0]
+            if end_time > current_view_range[1] or start_time < current_view_range[0]:
+                 # Calculate the desired new range based on the last data point
+                 # Keep the same duration as the current view range
+                 view_duration = current_view_range[1] - current_view_range[0]
+                 new_end_time = end_time
+                 new_start_time = max(plot_times[0], new_end_time - view_duration)
+
+                 # Apply the new range to all plots
+                 for plot_widget in self.plot_widgets:
+                     plot_widget.getViewBox().setXRange(new_start_time, new_end_time, padding=0.01)
+                    
         # --- Touch Point Detection and Pixel Map Update ---
         touched_row = -1
         touched_col = -1
@@ -77,9 +122,13 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             touched_col = activated_cols[0]
             # Emit signal to update pixel map
             self.update_pixel_map_signal.emit(touched_row, touched_col)
-        else:
-            # No touch or multiple touches (clear pixel map)
-            self.update_pixel_map_signal.emit(-1, -1) # Use -1 to indicate no touch
+            # Emit signal to update digital matrix with the time of the last data point
+            if self.data_queues[0]: # Use time from the first channel as a reference
+                 touch_time = self.data_queues[0][-1][1]
+                 self.update_digital_matrix_signal.emit(touched_row, touched_col, touch_time)
+
+        # No touch or multiple touches - do not clear pixel map or digital matrix here
+        # Clearing is handled by the clear button and when stopping test data generation
 
 
     def _generate_single_test_data_point(self):
@@ -89,7 +138,6 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
 
         # 生成一组模拟数据
         test_values = []
-        current_time = time.time() # Use current time for dynamic data
 
         # Simulate a single touch point for testing
         simulated_touch_row = random.randint(0, 3)
@@ -115,34 +163,70 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             value = max(0, min(3.3, value))
             test_values.append(value)
 
-        # 更新图表和像素映射
-        self.update_plots(test_values)
+        # 更新图表和像素映射，传递模拟数据和相对时间
+        current_time = time.time()
+        if self.data_acquisition_start_time is None:
+            self.data_acquisition_start_time = current_time
+            # Reset plot views when starting new data acquisition
+            self._reset_plot_views()
+        relative_time = current_time - self.data_acquisition_start_time
+        self.update_plots([test_values, relative_time])
+
+        # Increment the total generated points
+        self.test_data_total_points += 1
+
+        # Check if the target number of points has been reached AFTER updating plots
+        if self.test_data_total_points >= self.test_data_points:
+            self.test_data_timer.stop()
+            self.is_generating_test_data = False
+            self.test_data_button.setText("生成测试数据")
+            self.status_bar.showMessage(f"测试数据采集完成 ({self.test_data_points} 点)")
+            # The last point's pixel map and digital matrix updates are handled by update_plots
+
+
 
 
     def toggle_test_data_generation(self):
         if not self.is_generating_test_data:
-            # 保存原始采样间隔
-            self.original_sample_interval_s = self.sample_interval_s
-            # 设置测试数据采样间隔 (10Hz -> 0.1s)
-            self.sample_interval_s = 0.1
-            # 开始生成数据
+            # Get frequency in Hz and points from spinboxes
+            frequency_hz = self.frequency_spinbox.value()
+            self.test_data_points = self.points_spinbox.value()
+
+            # Calculate timer interval in ms from frequency in Hz
+            if frequency_hz > 0:
+                timer_interval_ms = int(1000 / frequency_hz)
+            else:
+                timer_interval_ms = 1000 # Default to 1 Hz if frequency is 0 or less
+
+            # Reset total points counter
+            self.test_data_total_points = 0
+
+            # Set test data sample interval (based on timer interval)
+            # self.sample_interval_s = timer_interval_ms / 1000.0 # This is no longer needed as we use real time
+
+            # Start generating data
             self.is_generating_test_data = True # Update flag in PlotManager
+            # Disconnect any previous connections before connecting
+            try:
+                self.test_data_timer.timeout.disconnect(self._generate_single_test_data_point)
+            except TypeError:
+                pass # Ignore if not connected
             self.test_data_timer.timeout.connect(self._generate_single_test_data_point)
-            self.test_data_timer.start(100) # 10Hz = 100ms interval
+            self.test_data_timer.start(timer_interval_ms) # Use calculated interval
+
             self.test_data_button.setText("停止生成")
-            self.status_bar.showMessage("测试数据采集中 (10Hz)...")
+            self.status_bar.showMessage(f"测试数据采集中 ({frequency_hz} Hz, 共 {self.test_data_points} 点)...")
         else:
-            # 停止生成数据
+            # Stop generating data manually
             self.test_data_timer.stop()
-            self.test_data_timer.timeout.disconnect(self._generate_single_test_data_point) # 断开连接以避免再次启动时重复连接
+            try:
+                self.test_data_timer.timeout.disconnect(self._generate_single_test_data_point)
+            except TypeError:
+                pass # Ignore if not connected
             self.is_generating_test_data = False # Update flag in PlotManager
             self.test_data_button.setText("生成测试数据")
-            # 恢复原始采样间隔
-            if hasattr(self, 'original_sample_interval_s'):
-                self.sample_interval_s = self.original_sample_interval_s
             self.status_bar.showMessage("测试数据采集已停止")
-            # Clear the pixel map when stopping test data generation
-            self.update_pixel_map_signal.emit(-1, -1)
+            # Do NOT clear the pixel map or digital matrix here. They should persist until cleared by the user.
 
 
     def export_data_to_csv(self):
@@ -175,8 +259,10 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
                         if self.data_queues[i]:
                            max_samples = max(max_samples, len(self.data_queues[i]))
 
-                    if max_samples == 0 and self.data_queues[0]: # Check if only first channel has data
-                        max_samples = len(self.data_queues[0])
+                    if max_samples == 0 and self.data_queues[0]: # Fallback if first queue has data but loop didn't catch
+                         if self.data_queues[0]:
+                            max_samples = len(self.data_queues[0])
+
 
                     # Write data rows
                     for sample_idx in range(max_samples):
@@ -185,15 +271,17 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
                         # For simplicity, we'll use the time from the first channel that has this sample
                         # or derive it if all channels are synchronized by sample count.
 
-                        # Get time from the first available channel for this sample_idx
                         current_sample_time = None
+                        # Find the time from the first channel that has data at this sample_idx
                         for i in range(8):
                             if sample_idx < len(self.data_queues[i]):
                                 current_sample_time = self.data_queues[i][sample_idx][1] # (voltage, time_s)
                                 break
+
                         if current_sample_time is None: # Should not happen if max_samples is correct
                             # Fallback: calculate time based on sample_idx and interval if no direct time found
                             current_sample_time = sample_idx * self.sample_interval_s
+
 
                         row_data.append(f"{current_sample_time:.3f}")
 
@@ -277,33 +365,7 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         else:
             plot_widget.hover_text_item.hide()
 
-    def _synchronize_x_ranges(self, changed_vb):
-        if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x:
-            return
-        self.is_synchronizing_x = True
-
-        new_x_range = changed_vb.viewRange()[0] # Get the new x-range from the source ViewBox
-
-        for pw in self.plot_widgets:
-            if pw.getViewBox() is not changed_vb: # Don't update the ViewBox that triggered the signal
-                pw.getViewBox().setXRange(new_x_range[0], new_x_range[1], padding=0)
-
-        self.is_synchronizing_x = False
-
-    def _clear_plot_data(self):
-        for i in range(8):
-            self.data_queues[i].clear()
-            self.data_lines[i].setData([], [])
-            self.voltage_labels[i].setText(f"CH{i+1}: 0.000 V")
-        # 可选：如果需要，重置图表X轴，或保持原样
-        # self._reset_plot_views() # 可调用此方法重置缩放/平移
-        # 状态栏更新需要在MainWindow中处理
-        # self.status_bar.showMessage("图表数据已清空")
-        # Clear the pixel map when clearing data
-        self.update_pixel_map_signal.emit(-1, -1)
-
-
-    def _reset_plot_views(self):
+    def _reset_all_x_ranges_to_data_range(self, changed_vb):
         if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x: # Prevent issues if called during an ongoing sync
             return
         self.is_synchronizing_x = True # Prevent sync signals during manual reset
@@ -338,6 +400,56 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             pw.getViewBox().setXRange(current_min_time, current_max_time, padding=0)
             # Y-axis is already fixed and non-interactive, so no Y-reset needed here
             # 如果需要，可以添加：pw.getViewBox().setYRange(0, 3.3, padding=0)
+
+        self.is_synchronizing_x = False
+
+    def _clear_plot_data(self):
+        for i in range(8):
+            self.data_queues[i].clear()
+            self.data_lines[i].setData([], [])
+            self.voltage_labels[i].setText(f"CH{i+1}: 0.000 V")
+        # 可选：如果需要，重置图表X轴，或保持原样
+        # self._reset_plot_views() # 可调用此方法重置缩放/平移
+        # 状态栏更新需要在MainWindow中处理
+        # self.status_bar.showMessage("图表数据已清空")
+        # Clear the pixel map and digital matrix when clearing data
+        self.update_pixel_map_signal.emit(-1, -1)
+
+
+    def _reset_plot_views(self):
+        if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x: # Prevent issues if called during an ongoing sync
+            return
+        self.is_synchronizing_x = True # Prevent sync signals during manual reset
+
+        # Determine the current time range based on the first non-empty data queue
+        # If all queues are empty, reset to a default initial view.
+        current_min_time = 0.0
+        current_max_time = 5.0 # Default to show 5 seconds initially
+
+        # Try to find the actual time range from data
+        found_data_range = False
+        for queue in self.data_queues:
+            if queue:
+                times = [item[1] for item in queue]
+                current_min_time = times[0]
+                current_max_time = times[-1]
+                # Ensure we show at least 1 second of data
+                if (current_max_time - current_min_time) < 1.0:
+                    current_max_time = current_min_time + 1.0
+                found_data_range = True
+                break
+
+        if not found_data_range and self.data_queues[0]: # Fallback if first queue has data but loop didn't catch
+             if self.data_queues[0]:
+                times = [item[1] for item in self.data_queues[0]]
+                current_min_time = times[0]
+                current_max_time = times[-1]
+                if (current_max_time - current_min_time) < 1.0:
+                    current_max_time = current_min_time + 1.0
+
+        for pw in self.plot_widgets:
+            pw.getViewBox().setXRange(current_min_time, current_max_time, padding=0.1)
+            # Y-axis is already fixed and non-interactive, so no Y-reset needed here
 
         self.is_synchronizing_x = False
 
