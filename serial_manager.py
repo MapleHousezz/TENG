@@ -1,15 +1,21 @@
 # serial_manager.py
+#
+# 文件功能说明:
+# 该文件包含 SerialManager 类，负责管理串口连接和配置。
+# 它处理 UI 控件（如下拉框和按钮）与 SerialThread 之间的交互，
+# 允许用户选择串口参数、连接和断开串口，并接收来自 SerialThread 的数据和状态更新。
+#
 
 import serial
 import serial.tools.list_ports
 from PyQt5.QtWidgets import QComboBox, QPushButton, QMessageBox, QStatusBar
 from PyQt5.QtCore import pyqtSignal, QObject
-from serial_handler import SerialThread # Assuming SerialThread is in serial_handler.py
+from serial_handler import SerialThread # 假设 SerialThread 在 serial_handler.py 中
 
 class SerialManager(QObject):
-    # Define signals that MainWindow will connect to
-    status_changed = pyqtSignal(str)
-    data_received = pyqtSignal(list) # Assuming data is received as a list of values
+    # 定义将连接到 MainWindow 的信号
+    status_changed = pyqtSignal(str) # 串口状态改变时发出的信号
+    data_received = pyqtSignal(list) # 假设数据以值列表的形式接收
 
     def __init__(self, port_combo, baud_combo, flow_control_combo, parity_combo, databits_combo, stopbits_combo, connect_button, disconnect_button, status_bar):
         super().__init__()
@@ -21,28 +27,30 @@ class SerialManager(QObject):
         self.stopbits_combo = stopbits_combo
         self.connect_button = connect_button
         self.disconnect_button = disconnect_button
-        self.status_bar = status_bar # Need status bar reference to update messages
+        self.status_bar = status_bar # 需要状态栏引用来更新消息
 
-        self.serial_thread = None
+        self.serial_thread = None # 串口处理线程实例
 
     def populate_serial_ports(self):
-        ports = serial.tools.list_ports.comports()
-        self.port_combo.clear()
+        """填充可用串口到下拉框。"""
+        ports = serial.tools.list_ports.comports() # 获取可用串口列表
+        self.port_combo.clear() # 清空下拉框
         for port in ports:
-            self.port_combo.addItem(port.device)
+            self.port_combo.addItem(port.device) # 添加串口设备名称
         if not ports:
-            self.port_combo.addItem("无可用串口")
-            self.connect_button.setEnabled(False)
+            self.port_combo.addItem("无可用串口") # 如果没有可用串口，显示提示
+            self.connect_button.setEnabled(False) # 禁用连接按钮
 
     def connect_serial(self):
-        port = self.port_combo.currentText()
+        """连接到选定的串口。"""
+        port = self.port_combo.currentText() # 获取选定的串口名称
         if port == "无可用串口":
-            QMessageBox.warning(None, "连接错误", "没有选择有效的串口。") # Use None as parent for QMessageBox
+            QMessageBox.warning(None, "连接错误", "没有选择有效的串口。") # 使用 None 作为 QMessageBox 的父级
             return
 
-        baudrate = int(self.baud_combo.currentText())
+        baudrate = int(self.baud_combo.currentText()) # 获取选定的波特率
 
-        stopbits_str = self.stopbits_combo.currentText()
+        stopbits_str = self.stopbits_combo.currentText() # 获取选定的停止位字符串
         if stopbits_str == "1":
             stopbits = serial.STOPBITS_ONE
         elif stopbits_str == "1.5":
@@ -50,7 +58,7 @@ class SerialManager(QObject):
         else: # "2"
             stopbits = serial.STOPBITS_TWO
 
-        databits_str = self.databits_combo.currentText()
+        databits_str = self.databits_combo.currentText() # 获取选定的数据位字符串
         if databits_str == "5":
             databits = serial.FIVEBITS
         elif databits_str == "6":
@@ -60,7 +68,7 @@ class SerialManager(QObject):
         else: # "8"
             databits = serial.EIGHTBITS
 
-        parity_str = self.parity_combo.currentText()
+        parity_str = self.parity_combo.currentText() # 获取选定的奇偶校验字符串
         if parity_str == "None":
             parity = serial.PARITY_NONE
         elif parity_str == "Even":
@@ -72,13 +80,15 @@ class SerialManager(QObject):
         else: # "Space"
             parity = serial.PARITY_SPACE
 
-        flowcontrol = self.flow_control_combo.currentText()
+        flowcontrol = self.flow_control_combo.currentText() # 获取选定的流控制方式
 
+        # 创建并启动串口处理线程
         self.serial_thread = SerialThread(port, baudrate, stopbits, databits, parity, flowcontrol)
-        self.serial_thread.data_received.connect(self.data_received.emit)
-        self.serial_thread.status_changed.connect(self.status_changed.emit)
-        self.serial_thread.start()
+        self.serial_thread.data_received.connect(self.data_received.emit) # 连接数据接收信号
+        self.serial_thread.status_changed.connect(self.status_changed.emit) # 连接状态改变信号
+        self.serial_thread.start() # 启动线程
 
+        # 更新 UI 控件状态
         self.connect_button.setEnabled(False)
         self.disconnect_button.setEnabled(True)
         self.port_combo.setEnabled(False)
@@ -87,15 +97,17 @@ class SerialManager(QObject):
         self.databits_combo.setEnabled(False)
         self.parity_combo.setEnabled(False)
         self.flow_control_combo.setEnabled(False)
-        # Data engine and interface combos are handled by MainWindow
+        # 数据引擎和接口下拉框由 MainWindow 处理
         # self.data_engine_combo.setEnabled(False)
         # self.data_interface_combo.setEnabled(False)
 
     def disconnect_serial(self):
+        """断开当前串口连接。"""
         if self.serial_thread and self.serial_thread.isRunning():
-            self.serial_thread.stop()
+            self.serial_thread.stop() # 停止线程
             self.serial_thread.wait() # 等待线程结束
 
+        # 更新 UI 控件状态
         self.connect_button.setEnabled(True)
         self.disconnect_button.setEnabled(False)
         self.port_combo.setEnabled(True)
@@ -104,10 +116,11 @@ class SerialManager(QObject):
         self.databits_combo.setEnabled(True)
         self.parity_combo.setEnabled(True)
         self.flow_control_combo.setEnabled(True)
-        # Data engine and interface combos are handled by MainWindow
+        # 数据引擎和接口下拉框由 MainWindow 处理
         # self.data_engine_combo.setEnabled(True)
         # self.data_interface_combo.setEnabled(True)
-        self.status_changed.emit("串口已断开")
+        self.status_changed.emit("串口已断开") # 发出状态改变信号
 
     def is_connected(self):
-        return self.serial_thread is not None and self.serial_thread.isRunning()
+        """检查串口是否已连接。"""
+        return self.serial_thread is not None and self.serial_thread.isRunning() # 返回连接状态
