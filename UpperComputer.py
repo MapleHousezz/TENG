@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         self.plot_widgets = []
         self.data_lines = []
         self.data_queues = [[] for _ in range(8)] # 每个通道一个数据队列 (voltage, time_s)
-        self.max_data_points = 200 # 图表上显示的最大数据点数
+        self.max_data_points = 1000 # 图表上显示的最大数据点数
         self.hover_texts = [] # 用于存储每个图表的悬停文本对象
         self.is_synchronizing_x = False # Flag to prevent recursive X-axis sync
         self.sample_interval_s = 0.001 # 采样间隔，秒 (对应1ms)

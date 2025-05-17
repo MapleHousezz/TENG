@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\Users\\GQL\\Desktop\\PyQt"
+      ],
+      "fromGalleryId": "modelcontextprotocol.servers_filesystem",
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "Puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ],
+      "env": {},
+      "fromGalleryId": "modelcontextprotocol.servers_puppeteer",
+      "disabled": true,
+      "alwaysAllow": []
+    },
+    "browser-tools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@agentdeskai/browser-tools-mcp@latest"
+      ],
+      "fromGalleryId": "AgentDeskAI.browser-tools-mcp",
+      "disabled": true,
+      "alwaysAllow": []
+    }
+  }
+}

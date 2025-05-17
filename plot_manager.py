@@ -302,68 +302,68 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
         vb = plot_widget.getViewBox()
         if plot_widget.sceneBoundingRect().contains(pos):
             mouse_point = vb.mapSceneToView(pos)
-            # xData now contains time values (floats)
-            # yData contains voltage values (floats)
-            x_data = self.data_lines[plot_index].xData
-            y_data = self.data_lines[plot_index].yData
+            mouse_x = mouse_point.x() # Get the mouse's x-coordinate in view coordinates
 
-            if x_data is not None and len(x_data) > 0:
-                # Find the index of the data point closest to the mouse's x-coordinate
-                # This is a simple way, for large datasets, numpy.argmin(numpy.abs(x_data - mouse_point.x())) would be more efficient
-                min_dist = float('inf')
-                closest_index = -1
-                for idx, x_val in enumerate(x_data):
-                    dist = abs(x_val - mouse_point.x())
-                    if dist < min_dist:
-                        min_dist = dist
-                        closest_index = idx
+            # Update voltage labels for all channels based on the mouse's x-coordinate
+            voltage_strings = ["--- V"] * 8
+            for ch_idx in range(8):
+                ch_x_data = self.data_lines[ch_idx].xData
+                ch_y_data = self.data_lines[ch_idx].yData
 
-                # Check if the mouse is reasonably close to a data point on the x-axis
-                # This threshold can be adjusted. For example, half the sample interval.
-                if closest_index != -1 and min_dist < (self.sample_interval_s * 5): # Allow a bit of leeway
-                    actual_x_time = x_data[closest_index]
-                    actual_y_voltage = y_data[closest_index] # Voltage of the hovered plot at that point
+                if ch_x_data is not None and len(ch_x_data) > 0:
+                    first_x = ch_x_data[0]
+                    last_x = ch_x_data[-1]
 
-                    # If data generation is stopped, update all voltage labels based on hovered time
-                    # Need to access MainWindow's state for this
-                    if not self.is_generating_test_data and not self.serial_thread_running:
-                        # Store voltage strings for each channel
-                        voltage_strings = ["--- V"] * 8
-                        for ch_idx in range(8):
-                            ch_x_data = self.data_lines[ch_idx].xData
-                            ch_y_data = self.data_lines[ch_idx].yData
+                    if mouse_x < first_x:
+                        # Mouse is before the first data point, use the first point's voltage
+                        interpolated_voltage = ch_y_data[0]
+                    elif mouse_x > last_x:
+                        # Mouse is after the last data point, use the last point's voltage
+                        interpolated_voltage = ch_y_data[-1]
+                    else:
+                        # Mouse is within the data range, find the two closest points and interpolate
+                        # Find the index of the point just before or at mouse_x
+                        idx1 = 0
+                        for i in range(len(ch_x_data) - 1):
+                            if ch_x_data[i+1] > mouse_x:
+                                idx1 = i
+                                break
+                            idx1 = i + 1 # In case mouse_x is exactly on a data point or after the second to last
 
-                            if ch_x_data is not None and len(ch_x_data) > 0:
-                                # Find closest data point in this channel to actual_x_time
-                                ch_min_dist = float('inf')
-                                ch_closest_idx = -1
-                                for idx_in_ch, x_val_in_ch in enumerate(ch_x_data):
-                                    dist_in_ch = abs(x_val_in_ch - actual_x_time)
-                                    if dist_in_ch < ch_min_dist:
-                                        ch_min_dist = dist_in_ch
-                                        ch_closest_idx = idx_in_ch
+                        # idx1 is now the index of the point <= mouse_x
+                        # idx2 is the index of the point >= mouse_x
+                        idx2 = idx1
+                        if ch_x_data[idx1] < mouse_x and idx1 < len(ch_x_data) - 1:
+                             idx2 = idx1 + 1
 
-                                # Check if the found point is reasonably close (e.g., within a sample interval)
-                                if ch_closest_idx != -1 and ch_min_dist < self.sample_interval_s * 1.5: # Allow small tolerance
-                                    voltage_strings[ch_idx] = f"{ch_y_data[ch_closest_idx]:.3f} V"
+                        x1, y1 = ch_x_data[idx1], ch_y_data[idx1]
+                        x2, y2 = ch_x_data[idx2], ch_y_data[idx2]
 
-                        # Update all voltage labels after finding closest points for all channels
-                        for ch_idx in range(8):
-                             self.voltage_labels[ch_idx].setText(f"CH{ch_idx+1}: {voltage_strings[ch_idx]}")
-                    # elif self.is_generating_test_data or self.serial_thread_running:
-                        # If data is generating, update only the hovered plot's label (or rely on update_plots)
-                        # self.voltage_labels[plot_index].setText(f"CH{plot_index+1}: {actual_y_voltage:.3f} V")
-                        # The update_plots method already handles this for active data generation.
-                        pass # Voltage labels are updated by update_plots during active data generation
+                        interpolated_voltage = self.linear_interpolate(mouse_x, x1, y1, x2, y2)
 
-                    # Remove on-plot hover text display
-                    plot_widget.hover_text_item.hide()
+                    voltage_strings[ch_idx] = f"{interpolated_voltage:.3f} V"
                 else:
-                    plot_widget.hover_text_item.hide()
-            else:
-                plot_widget.hover_text_item.hide()
+                    # No data in this channel
+                    voltage_strings[ch_idx] = "--- V"
+
+
+            # Update all voltage labels after calculating voltages for all channels
+            for ch_idx in range(8):
+                 self.voltage_labels[ch_idx].setText(f"CH{ch_idx+1}: {voltage_strings[ch_idx]}")
+
+            # Remove on-plot hover text display (if any)
+            # The original code had hover_text_item, but it's not used for displaying text on the plot.
+            # Keeping this line for safety if it's used elsewhere or intended for future use.
+            if hasattr(plot_widget, 'hover_text_item') and plot_widget.hover_text_item:
+                 plot_widget.hover_text_item.hide()
+
         else:
-            plot_widget.hover_text_item.hide()
+            # Mouse left the plot area, hide any potential hover text
+            if hasattr(plot_widget, 'hover_text_item') and plot_widget.hover_text_item:
+                 plot_widget.hover_text_item.hide()
+            # Optionally, reset voltage labels when mouse leaves the plot area
+            # for ch_idx in range(8):
+            #      self.voltage_labels[ch_idx].setText(f"CH{ch_idx+1}: --- V")
 
     def _reset_all_x_ranges_to_data_range(self, changed_vb):
         if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x: # Prevent issues if called during an ongoing sync
@@ -408,10 +408,12 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             self.data_queues[i].clear()
             self.data_lines[i].setData([], [])
             self.voltage_labels[i].setText(f"CH{i+1}: 0.000 V")
-        # 可选：如果需要，重置图表X轴，或保持原样
-        # self._reset_plot_views() # 可调用此方法重置缩放/平移
-        # 状态栏更新需要在MainWindow中处理
-        # self.status_bar.showMessage("图表数据已清空")
+        # Reset the data acquisition start time
+        self.data_acquisition_start_time = None
+        # Optional: reset plot X-axis, or keep as is
+        # self._reset_plot_views() # Can call this method to reset zoom/pan
+        # Status bar update needs to be handled in MainWindow
+        # self.status_bar.showMessage("Plot data cleared")
         # Clear the pixel map and digital matrix when clearing data
         self.update_pixel_map_signal.emit(-1, -1)
 
@@ -452,5 +454,11 @@ class PlotManager(QObject): # Inherit from QObject to use signals/slots
             # Y-axis is already fixed and non-interactive, so no Y-reset needed here
 
         self.is_synchronizing_x = False
+
+    def linear_interpolate(self, x, x1, y1, x2, y2):
+        """Performs linear interpolation."""
+        if x1 == x2:
+            return y1
+        return y1 + (x - x1) * (y2 - y1) / (x2 - x1)
 
 # 其他与图表相关的函数或类的占位符
