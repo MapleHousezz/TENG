@@ -1,3 +1,4 @@
+#python所需包列表
 pyserial>=3.5
 PyQt5>=5.15
 pyqtgraph>=0.12
