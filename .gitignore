@@ -1,0 +1,12 @@
+# Ignore Python cache files
+__pycache__/
+
+# Ignore specific directories
+.roo/
+
+# Ignore specific files
+array.md
+PyQt_UpperComputer_Software_Documentation.md
+
+# Ignore generated .bmp files
+*.bmp
