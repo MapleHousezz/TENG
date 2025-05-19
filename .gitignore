@@ -12,3 +12,5 @@ PyQt_UpperComputer_Software_Documentation.md
 *.bmp
 
 #test
+# Ignore PyInstaller spec files
+UpperComputer.spec
