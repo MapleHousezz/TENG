@@ -290,7 +290,7 @@ def create_data_display_area(parent):
             plot_widget.setXLink(plot_widgets[0]) # 链接 X 轴
             # 连接视图范围改变信号以同步所有图表
             plot_widget.getViewBox().sigXRangeChanged.connect(
-                lambda vb, rng, idx=i: parent.plot_manager._reset_plot_views())
+                lambda vb, rng, idx=i: parent.plot_manager._synchronize_x_ranges(vb, rng))
 
         data_line = plot_widget.plot([], [], pen=pg.mkPen(color=(i*30 % 255, i*50 % 255, i*70 % 255), width=2)) # 创建数据线条
         data_lines.append(data_line) # 添加数据线条到列表

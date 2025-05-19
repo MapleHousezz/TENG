@@ -465,5 +465,17 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         if x1 == x2:
             return y1
         return y1 + (x - x1) * (y2 - y1) / (x2 - x1)
+def _synchronize_x_ranges(self, changed_vb, new_x_range):
+        """Synchronizes the X-axis range of all plot widgets."""
+        if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x:
+            return
+        self.is_synchronizing_x = True
+
+        for plot_widget in self.plot_widgets:
+            vb = plot_widget.getViewBox()
+            if vb is not changed_vb:
+                vb.setXRange(new_x_range[0], new_x_range[1], padding=0)
+
+        self.is_synchronizing_x = False
 
 # 其他与图表相关的函数或类的占位符
