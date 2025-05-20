@@ -21,14 +21,15 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
     update_pixel_map_signal = pyqtSignal(int, int) # 发送触摸像素的行和列的信号
     update_digital_matrix_signal = pyqtSignal(int, int, float) # 发送行、列和时间的信号
 
-    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, max_data_points, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 digital_matrix_labels 参数
+    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 digital_matrix_labels 参数
         super().__init__() # 调用 QObject 构造函数
         self.plot_widgets = plot_widgets
         self.data_lines = data_lines
-        self.data_queues = data_queues
+        # 将数据队列更改为普通列表
+        self.data_queues = [[] for _ in range(8)] # 修改为普通列表
         self.voltage_labels = voltage_labels
         self.sample_interval_s = sample_interval_s
-        self.max_data_points = max_data_points
+        # self.max_data_points = max_data_points # 移除 max_data_points
         self.test_data_button = test_data_button
         self.status_bar = status_bar
         self.test_data_timer = test_data_timer
@@ -75,35 +76,15 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         for i in range(8):
             voltage = values[i]
 
-            # 使用计算出的相对时间
+            # 将新数据点添加到 deque 中，deque 会自动处理 maxlen
             self.data_queues[i].append((voltage, current_time_s))
 
             # 提取用于绘图的 x (时间) 和 y (电压) 数据
-            # 优化：直接更新数据线条的数据，而不是重新创建列表
-            # plot_times = [item[1] for item in self.data_queues[i]]
-            # plot_voltages = [item[0] for item in self.data_queues[i]]
-            # self.data_lines[i].setData(plot_times, plot_voltages)
-
-            # 获取当前数据
-            current_x_data = self.data_lines[i].xData
-            current_y_data = self.data_lines[i].yData
-
-            # 如果是第一个数据点，初始化数组
-            if current_x_data is None or len(current_x_data) == 0:
-                new_x_data = [current_time_s]
-                new_y_data = [voltage]
-            else:
-                # 否则，将新数据点添加到现有数组
-                new_x_data = current_x_data.tolist() + [current_time_s]
-                new_y_data = current_y_data.tolist() + [voltage]
-
-            # 限制数据点数量
-            if len(new_x_data) > self.max_data_points:
-                new_x_data = new_x_data[-self.max_data_points:]
-                new_y_data = new_y_data[-self.max_data_points:]
+            plot_times = [item[1] for item in self.data_queues[i]]
+            plot_voltages = [item[0] for item in self.data_queues[i]]
 
             # 更新数据线条
-            self.data_lines[i].setData(new_x_data, new_y_data)
+            self.data_lines[i].setData(plot_times, plot_voltages)
 
             # 如果数据正在主动生成，更新电压标签
             if self.is_generating_test_data or self.serial_thread_running: # 需要从 MainWindow 更新 serial_thread_running 标志
@@ -398,7 +379,7 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         # 根据第一个非空数据队列确定当前时间范围
         # 如果所有队列都为空，则重置为默认初始视图。
         current_min_time = 0.0
-        current_max_time = self.max_data_points * self.sample_interval_s # 如果没有数据，默认最大时间
+        current_max_time = 5.0 # 如果没有数据，默认最大时间为5秒
 
         # 尝试从数据中查找实际时间范围
         found_data_range = False
@@ -407,9 +388,9 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
                 times = [item[1] for item in queue]
                 current_min_time = times[0]
                 current_max_time = times[-1]
-                # 如果数据较少，确保范围至少覆盖 max_data_points 窗口
-                if (current_max_time - current_min_time) < (self.max_data_points * self.sample_interval_s):
-                    current_max_time = current_min_time + (self.max_data_points * self.sample_interval_s)
+                # 如果数据较少，确保范围至少覆盖一个较小的默认窗口，例如5秒
+                if (current_max_time - current_min_time) < 5.0:
+                    current_max_time = current_min_time + 5.0
                 found_data_range = True
                 break
 
@@ -418,8 +399,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
                 times = [item[1] for item in self.data_queues[0]]
                 current_min_time = times[0]
                 current_max_time = times[-1]
-                if (current_max_time - current_min_time) < (self.max_data_points * self.sample_interval_s):
-                    current_max_time = current_min_time + (self.max_data_points * self.sample_interval_s)
+                if (current_max_time - current_min_time) < 5.0:
+                    current_max_time = current_min_time + 5.0
 
         for pw in self.plot_widgets:
             pw.getViewBox().setXRange(current_min_time, current_max_time, padding=0)

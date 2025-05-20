@@ -31,9 +31,9 @@ class MainWindow(QMainWindow):
 
         self.serial_thread = None # 串口线程实例
         self.plot_widgets = [] # 图表控件列表
-        self.data_lines = [] # 数据线条列表
+        self.data_lines = [] # 数据线条
         self.data_queues = [[] for _ in range(8)] # 每个通道一个数据队列 (电压, 时间_s)
-        self.max_data_points = 1000 # 图表上显示的最大数据点数
+        # self.max_data_points = 1000 # 图表上显示的最大数据点数 (已在 PlotManager 中移除)
         self.hover_texts = [] # 用于存储每个图表的悬停文本对象
         self.is_synchronizing_x = False # 标志，防止 X 轴递归同步
         self.sample_interval_s = 0.001 # 采样间隔，秒 (对应1ms)
@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
             self.data_queues,
             self.voltage_labels,
             self.sample_interval_s,
-            self.max_data_points,
+            # self.max_data_points, # 移除 max_data_points
             self.test_data_button,
             self.status_bar,
             self.test_data_timer,
