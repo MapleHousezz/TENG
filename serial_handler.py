@@ -76,7 +76,7 @@ class SerialThread(QThread):
                     values = []
                     for i in range(8): # 解析 8 个浮点数
                         value_bytes = frame_data[i*4 : (i+1)*4] # 提取每个浮点数的字节
-                        value = struct.unpack('>f', value_bytes)[0] # 按大端浮点数解析
+                        value = struct.unpack('<f', value_bytes)[0] # 按小端浮点数解析
                         values.append(value) # 添加到值列表
 
                     current_time = time.time() # 获取当前时间

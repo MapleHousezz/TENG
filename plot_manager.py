@@ -77,21 +77,42 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
 
             # 使用计算出的相对时间
             self.data_queues[i].append((voltage, current_time_s))
-            if len(self.data_queues[i]) > self.max_data_points:
-                self.data_queues[i].pop(0) # 移除最老的数据点
 
             # 提取用于绘图的 x (时间) 和 y (电压) 数据
-            plot_times = [item[1] for item in self.data_queues[i]]
-            plot_voltages = [item[0] for item in self.data_queues[i]]
-            self.data_lines[i].setData(plot_times, plot_voltages)
+            # 优化：直接更新数据线条的数据，而不是重新创建列表
+            # plot_times = [item[1] for item in self.data_queues[i]]
+            # plot_voltages = [item[0] for item in self.data_queues[i]]
+            # self.data_lines[i].setData(plot_times, plot_voltages)
+
+            # 获取当前数据
+            current_x_data = self.data_lines[i].xData
+            current_y_data = self.data_lines[i].yData
+
+            # 如果是第一个数据点，初始化数组
+            if current_x_data is None or len(current_x_data) == 0:
+                new_x_data = [current_time_s]
+                new_y_data = [voltage]
+            else:
+                # 否则，将新数据点添加到现有数组
+                new_x_data = current_x_data.tolist() + [current_time_s]
+                new_y_data = current_y_data.tolist() + [voltage]
+
+            # 限制数据点数量
+            if len(new_x_data) > self.max_data_points:
+                new_x_data = new_x_data[-self.max_data_points:]
+                new_y_data = new_y_data[-self.max_data_points:]
+
+            # 更新数据线条
+            self.data_lines[i].setData(new_x_data, new_y_data)
+
             # 如果数据正在主动生成，更新电压标签
             if self.is_generating_test_data or self.serial_thread_running: # 需要从 MainWindow 更新 serial_thread_running 标志
                 self.voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
 
         # 如果需要，自动调整所有图表的 X 轴范围
-        if plot_times:
-            start_time = plot_times[0]
-            end_time = plot_times[-1]
+        if self.data_queues and self.data_queues[0]:
+            start_time = self.data_queues[0][0][1]
+            end_time = self.data_queues[0][-1][1]
 
             # 仅当新数据超出当前视图时调整 X 轴范围
             current_view_range = self.plot_widgets[0].getViewBox().viewRange()[0]
@@ -106,7 +127,7 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
                  # 保持与当前视图范围相同的持续时间
                  view_duration = current_view_range[1] - current_view_range[0]
                  new_end_time = end_time
-                 new_start_time = max(plot_times[0], new_end_time - view_duration)
+                 new_start_time = max(start_time, new_end_time - view_duration)
 
                  # 将新范围应用于所有图表
                  for plot_widget in self.plot_widgets:
@@ -465,7 +486,7 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         if x1 == x2:
             return y1
         return y1 + (x - x1) * (y2 - y1) / (x2 - x1)
-def _synchronize_x_ranges(self, changed_vb, new_x_range):
+    def synchronize_x_ranges(self, changed_vb, new_x_range):
         """Synchronizes the X-axis range of all plot widgets."""
         if hasattr(self, 'is_synchronizing_x') and self.is_synchronizing_x:
             return
@@ -477,5 +498,4 @@ def _synchronize_x_ranges(self, changed_vb, new_x_range):
                 vb.setXRange(new_x_range[0], new_x_range[1], padding=0)
 
         self.is_synchronizing_x = False
-
 # 其他与图表相关的函数或类的占位符

@@ -104,8 +104,13 @@ class SerialManager(QObject):
     def disconnect_serial(self):
         """断开当前串口连接。"""
         if self.serial_thread and self.serial_thread.isRunning():
-            self.serial_thread.stop() # 停止线程
-            self.serial_thread.wait() # 等待线程结束
+            # 停止线程
+            self.serial_thread.stop()
+            # 关闭串口以中断读取操作
+            if self.serial_thread.serial_port and self.serial_thread.serial_port.is_open:
+                self.serial_thread.serial_port.close()
+            # 等待线程结束，确保安全退出
+            self.serial_thread.wait()
 
         # 更新 UI 控件状态
         self.connect_button.setEnabled(True)
