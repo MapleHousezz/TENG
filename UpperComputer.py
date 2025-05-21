@@ -33,7 +33,6 @@ class MainWindow(QMainWindow):
         self.serial_thread = None
         self.plot_widgets = []
         self.data_lines = []
-        self.data_queues = [[] for _ in range(8)]
         self.hover_texts = []
         self.is_synchronizing_x = False
         self.sample_interval_s = 0.001
@@ -49,10 +48,8 @@ class MainWindow(QMainWindow):
             self, # 传递 MainWindow 实例
             self.plot_widgets,
             self.data_lines,
-            self.data_queues,
             self.voltage_labels,
             self.sample_interval_s,
-            # self.max_data_points, # 移除 max_data_points
             self.test_data_button,
             self.status_bar,
             self.test_data_timer,

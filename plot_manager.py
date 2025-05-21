@@ -21,13 +21,14 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
     update_pixel_map_signal = pyqtSignal(int, int) # 发送触摸像素的行和列的信号
     update_digital_matrix_signal = pyqtSignal(int, int, float) # 发送行、列和时间的信号
 
-    def __init__(self, main_window, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 main_window 和 digital_matrix_labels 参数
+    def __init__(self, main_window, plot_widgets, data_lines, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 main_window 和 digital_matrix_labels 参数
         super().__init__() # 调用 QObject 构造函数
         self.main_window = main_window # 保存 MainWindow 引用
         self.plot_widgets = plot_widgets
         self.data_lines = data_lines
-        # 将数据队列更改为普通列表
-        self.data_queues = [[] for _ in range(8)] # 修改为普通列表
+        # 使用双缓存数据存储
+        self.display_data = [[] for _ in range(8)]  # 用于显示的数据
+        self.full_data = [[] for _ in range(8)]     # 完整历史数据
         self.voltage_labels = voltage_labels
         self.sample_interval_s = sample_interval_s
         # self.max_data_points = max_data_points # 移除 max_data_points
@@ -79,23 +80,20 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             row_signals = values[:4] # CH1-CH4
             col_signals = values[4:] # CH5-CH8
 
-            # 限制数据队列大小
-            max_points = 1000  # 最多保留1000个数据点
-            for i in range(8):
-                if len(self.data_queues[i]) > max_points:
-                    self.data_queues[i] = self.data_queues[i][-max_points:]
-
             # 批量处理数据更新
             for i in range(8):
                 voltage = values[i]
-                self.data_queues[i].append((voltage, current_time_s))
+                # 更新完整数据
+                self.full_data[i].append((voltage, current_time_s))
                 
                 # 更新数据线条
                 if i < len(self.data_lines):
-                    self.data_lines[i].setData(
-                        [item[1] for item in self.data_queues[i]],
-                        [item[0] for item in self.data_queues[i]]
-                    )
+                    if not hasattr(self, '_last_data') or self._last_data != self.full_data[i][-1]:
+                        self.data_lines[i].setData(
+                            [item[1] for item in self.full_data[i]],
+                            [item[0] for item in self.full_data[i]]
+                        )
+                        self._last_data = self.full_data[i][-1]
                     
                 # 更新电压标签
                 if self.is_generating_test_data or self.serial_thread_running:
@@ -109,8 +107,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
                 touched_row = activated_rows[0]
                 touched_col = activated_cols[0]
                 self.update_pixel_map_signal.emit(touched_row, touched_col)
-                if self.data_queues[0]:
-                    touch_time = self.data_queues[0][-1][1]
+                if self.display_data[0]:
+                    touch_time = self.display_data[0][-1][1]
                     self.update_digital_matrix_signal.emit(touched_row, touched_col, touch_time)
 
             # 记录最后更新时间
@@ -123,12 +121,6 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             if self.data_acquisition_start_time is None:
                 self.data_acquisition_start_time = current_time_s
 
-            # 限制数据队列大小
-            max_points = 1000  # 最多保留1000个数据点
-            for i in range(8):
-                if len(self.data_queues[i]) > max_points:
-                    self.data_queues[i] = self.data_queues[i][-max_points:]
-
             # 批量处理数据更新
             row_signals = values[:4]
             col_signals = values[4:]
@@ -140,11 +132,12 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             
             for i in range(8):
                 voltage = values[i]
-                self.data_queues[i].append((voltage, current_time_s))
+                # 更新完整数据
+                self.full_data[i].append((voltage, current_time_s))
                 
                 # 仅当需要显示时才提取数据
                 if i < len(data_lines):
-                    plot_data = self.data_queues[i]
+                    plot_data = self.full_data[i] # 使用 full_data 进行绘制
                     data_lines[i].setData(
                         [item[1] for item in plot_data],
                         [item[0] for item in plot_data]
@@ -158,30 +151,24 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             self._last_update_time = time.time()
 
         # 如果需要，自动调整所有图表的 X 轴范围
-        if self.data_queues and self.data_queues[0]:
-            start_time = self.data_queues[0][0][1]
-            end_time = self.data_queues[0][-1][1]
+        if self.full_data and self.full_data[0]: # Use full_data here
+            start_time = self.full_data[0][0][1] # Use full_data here
+            end_time = self.full_data[0][-1][1] # Use full_data here
 
-            # 仅当新数据超出当前视图时调整 X 轴范围
+            # // 仅当新数据超出当前视图时调整 X 轴范围
             current_view_range = self.plot_widgets[0].getViewBox().viewRange()[0]
-            view_duration = current_view_range[1] - current_view_range[0]
 
-            # 此自动调整仅在新数据到达时发生
-            # 且当前视图不包含新数据。
-            # 手动缩放/平移由 _synchronize_x_ranges 处理。
-            current_view_range = self.plot_widgets[0].getViewBox().viewRange()[0]
-            if end_time > current_view_range[1] or start_time < current_view_range[0]:
-                 # 根据最后一个数据点计算所需的新范围
-                 # 保持与当前视图范围相同的持续时间
-                 view_duration = current_view_range[1] - current_view_range[0]
-                 new_end_time = end_time
-                 new_start_time = max(start_time, new_end_time - view_duration)
+            # // 此自动调整仅在新数据到达时发生
+            # // 且当前视图不包含新数据。
+            # // 手动缩放/平移由 _synchronize_x_ranges 处理。
+            new_end_time = end_time
+            new_start_time = start_time # For full data, start time is the first data point's time
 
-                 # 将新范围应用于所有图表
-                 for plot_widget in self.plot_widgets:
-                     plot_widget.getViewBox().setXRange(new_start_time, new_end_time, padding=0.01)
+            # // 将新范围应用于所有图表
+            for plot_widget in self.plot_widgets:
+                plot_widget.getViewBox().setXRange(new_start_time, new_end_time, padding=0.01)
 
-        # --- 触摸点检测和像素地图更新 ---
+        # // 触摸点检测和像素地图更新
         touched_row = -1
         touched_col = -1
 
@@ -197,8 +184,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             # 发出信号更新像素地图
             self.update_pixel_map_signal.emit(touched_row, touched_col)
             # 发出信号更新数字矩阵，包含最后一个数据点的时间
-            if self.data_queues[0]: # 使用第一个通道的时间作为参考
-                 touch_time = self.data_queues[0][-1][1]
+            if self.display_data[0]: # 使用第一个通道的时间作为参考
+                 touch_time = self.display_data[0][-1][1]
                  self.update_digital_matrix_signal.emit(touched_row, touched_col, touch_time)
 
         # 没有触摸或多点触摸 - 不在此处清除像素地图或数字矩阵
@@ -303,16 +290,16 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
 
 
     def export_data_to_csv(self):
-        if not any(self.data_queues):
-            QMessageBox.information(None, "导出数据", "没有数据可导出。") # 使用 None 作为父级
+        """导出完整历史数据到CSV文件"""
+        if not any(self.full_data):
+            QMessageBox.information(None, "导出数据", "没有数据可导出。")
             return
 
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
-        file_path, _ = QFileDialog.getSaveFileName(None, "保存数据", "", "CSV 文件 (*.csv);;所有文件 (*)", options=options) # 使用 None 作为父级
+        file_path, _ = QFileDialog.getSaveFileName(None, "保存数据", "", "CSV 文件 (*.csv);;所有文件 (*)", options=options)
 
         if file_path:
-            # 确保文件路径以 .csv 结尾
             if not file_path.lower().endswith('.csv'):
                 file_path += '.csv'
 
@@ -326,44 +313,27 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
                         header.append(f'Channel {i+1} Voltage (V)')
                     csv_writer.writerow(header)
 
-                    # 确定所有通道的最大样本数以保持行一致
-                    max_samples = 0
-                    for i in range(8):
-                        if self.data_queues[i]:
-                           max_samples = max(max_samples, len(self.data_queues[i]))
-
-                    if max_samples == 0 and self.data_queues[0]: # 如果第一个队列有数据但循环未捕获，则回退
-                         if self.data_queues[0]:
-                            max_samples = len(self.data_queues[0])
-
-
+                    # 使用完整历史数据
+                    max_samples = max(len(channel) for channel in self.full_data)
+                    
                     # 写入数据行
                     for sample_idx in range(max_samples):
-                        row_data = [sample_idx]
-                        # 此样本索引的时间 - 假设是第一个通道的时间或根据需要计算
-                        # 为简单起见，我们将使用具有此样本的第一个通道的时间
-                        # 或者如果所有通道按样本数同步，则推导它。
-
-                        current_sample_time = None
-                        # 查找在 sample_idx 处具有数据的第一个通道的时间
-                        for i in range(8):
-                            if sample_idx < len(self.data_queues[i]):
-                                current_sample_time = self.data_queues[i][sample_idx][1] # (电压, 时间_s)
-                                break
-
-                        if current_sample_time is None: # 如果 max_samples 正确，则不应发生
-                            # 回退：如果未找到直接时间，则根据 sample_idx 和间隔计算时间
+                        row_data = [sample_idx + 1]  # 样本索引从1开始
+                        
+                        # 获取时间戳（使用第一个通道的时间）
+                        if sample_idx < len(self.full_data[0]):
+                            current_sample_time = self.full_data[0][sample_idx][1]
+                        else:
                             current_sample_time = sample_idx * self.sample_interval_s
-
-
+                            
                         row_data.append(f"{current_sample_time:.3f}")
 
+                        # 添加各通道电压值
                         for i in range(8):
-                            if sample_idx < len(self.data_queues[i]):
-                                voltage = self.data_queues[i][sample_idx][0]
-                                row_data.append(f"{voltage:.3f}")
+                            if sample_idx < len(self.full_data[i]):
+                                row_data.append(f"{self.full_data[i][sample_idx][0]:.3f}")
                             else:
-                                row_data.append('') # 如果此样本索引处此通道没有数据，则为空
+                                row_data.append('')
                         csv_writer.writerow(row_data)
 
                 self.status_bar.showMessage(f"数据已导出到 {os.path.basename(file_path)}")
@@ -443,31 +413,19 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             return
         self.is_synchronizing_x = True # 在手动重置期间防止同步信号
 
-        # 根据第一个非空数据队列确定当前时间范围
-        # 如果所有队列都为空，则重置为默认初始视图。
+        # 根据显示数据确定当前时间范围
+        # 如果数据为空，则重置为默认初始视图。
         current_min_time = 0.0
         current_max_time = 5.0 # 如果没有数据，默认最大时间为5秒
 
-        # 尝试从数据中查找实际时间范围
-        found_data_range = False
-        for queue in self.data_queues:
-            if queue:
-                times = [item[1] for item in queue]
-                current_min_time = times[0]
-                current_max_time = times[-1]
-                # 如果数据较少，确保范围至少覆盖一个较小的默认窗口，例如5秒
-                if (current_max_time - current_min_time) < 5.0:
-                    current_max_time = current_min_time + 5.0
-                found_data_range = True
-                break
-
-        if not found_data_range and self.data_queues[0]: # 如果第一个队列有数据但循环未捕获，则回退
-             if self.data_queues[0]:
-                times = [item[1] for item in self.data_queues[0]]
-                current_min_time = times[0]
-                current_max_time = times[-1]
-                if (current_max_time - current_min_time) < 5.0:
-                    current_max_time = current_min_time + 5.0
+        # 尝试从显示数据中查找实际时间范围
+        if self.display_data and self.display_data[0]:
+            times = [item[1] for item in self.display_data[0]]
+            current_min_time = times[0]
+            current_max_time = times[-1]
+            # 如果数据较少，确保范围至少覆盖一个较小的默认窗口，例如5秒
+            if (current_max_time - current_min_time) < 5.0:
+                current_max_time = current_min_time + 5.0
 
         for pw in self.plot_widgets:
             pw.getViewBox().setXRange(current_min_time, current_max_time, padding=0)
@@ -478,7 +436,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
 
     def _clear_plot_data(self):
         for i in range(8):
-            self.data_queues[i].clear()
+            self.display_data[i].clear()
+            self.full_data[i].clear()
             self.data_lines[i].setData([], [])
             self.voltage_labels[i].setText(f"CH{i+1}: 0.000 V")
         # 重置数据采集开始时间
@@ -500,31 +459,18 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             return
         self.is_synchronizing_x = True # 在手动重置期间防止同步信号
 
-        # 根据第一个非空数据队列确定当前时间范围
-        # 如果所有队列都为空，则重置为默认初始视图。
+        # 根据显示数据确定当前时间范围
         current_min_time = 0.0
         current_max_time = 5.0 # 默认初始显示 5 秒
 
-        # 尝试从数据中查找实际时间范围
-        found_data_range = False
-        for queue in self.data_queues:
-            if queue:
-                times = [item[1] for item in queue]
-                current_min_time = times[0]
-                current_max_time = times[-1]
-                # 确保至少显示 1 秒的数据
-                if (current_max_time - current_min_time) < 1.0:
-                    current_max_time = current_min_time + 1.0
-                found_data_range = True
-                break
-
-        if not found_data_range and self.data_queues[0]: # 如果第一个队列有数据但循环未捕获，则回退
-             if self.data_queues[0]:
-                times = [item[1] for item in self.data_queues[0]]
-                current_min_time = times[0]
-                current_max_time = times[-1]
-                if (current_max_time - current_min_time) < 1.0:
-                    current_max_time = current_min_time + 1.0
+        # 尝试从显示数据中查找实际时间范围
+        if self.display_data and self.display_data[0]:
+            times = [item[1] for item in self.display_data[0]]
+            current_min_time = times[0]
+            current_max_time = times[-1]
+            # 确保至少显示 1 秒的数据
+            if (current_max_time - current_min_time) < 1.0:
+                current_max_time = current_min_time + 1.0
 
         for pw in self.plot_widgets:
             pw.getViewBox().setXRange(current_min_time, current_max_time, padding=0.1)
