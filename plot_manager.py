@@ -21,8 +21,9 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
     update_pixel_map_signal = pyqtSignal(int, int) # 发送触摸像素的行和列的信号
     update_digital_matrix_signal = pyqtSignal(int, int, float) # 发送行、列和时间的信号
 
-    def __init__(self, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 digital_matrix_labels 参数
+    def __init__(self, main_window, plot_widgets, data_lines, data_queues, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 main_window 和 digital_matrix_labels 参数
         super().__init__() # 调用 QObject 构造函数
+        self.main_window = main_window # 保存 MainWindow 引用
         self.plot_widgets = plot_widgets
         self.data_lines = data_lines
         # 将数据队列更改为普通列表
@@ -57,38 +58,104 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         self.data_acquisition_start_time = None # 存储数据采集的开始时间
 
     def update_plots(self, data):
-        # data 是一个列表，包含 [values, current_time]
-        values = data[0] # values 是一个包含8个浮点数的列表 (CH1-CH8)
-        current_time_s = data[1] # current_time 是接收到数据时的真实时间戳
+        """更新图表数据，优化性能"""
+        # 检查数据有效性
+        if not data or len(data) < 2:
+            return
+            
+        values = data[0]
+        current_time_s = data[1]
+        
+        try:
+            # 限制数据处理频率
+            if hasattr(self, '_last_update_time') and time.time() - self._last_update_time < 0.05:  # 20Hz更新频率
+                return
+                
+            # 初始化开始时间
+            if self.data_acquisition_start_time is None:
+                self.data_acquisition_start_time = current_time_s
 
-        # 如果是第一个数据点，初始化开始时间
-        if self.data_acquisition_start_time is None:
-            self.data_acquisition_start_time = current_time_s
+            # CH1-CH4 是行信号，CH5-CH8 是列信号
+            row_signals = values[:4] # CH1-CH4
+            col_signals = values[4:] # CH5-CH8
 
-        # 计算相对时间
-        relative_time_s = current_time_s - self.data_acquisition_start_time
+            # 限制数据队列大小
+            max_points = 1000  # 最多保留1000个数据点
+            for i in range(8):
+                if len(self.data_queues[i]) > max_points:
+                    self.data_queues[i] = self.data_queues[i][-max_points:]
 
-        # CH1-CH4 是行信号，CH5-CH8 是列信号
-        row_signals = values[:4] # CH1-CH4
-        col_signals = values[4:] # CH5-CH8
+            # 批量处理数据更新
+            for i in range(8):
+                voltage = values[i]
+                self.data_queues[i].append((voltage, current_time_s))
+                
+                # 更新数据线条
+                if i < len(self.data_lines):
+                    self.data_lines[i].setData(
+                        [item[1] for item in self.data_queues[i]],
+                        [item[0] for item in self.data_queues[i]]
+                    )
+                    
+                # 更新电压标签
+                if self.is_generating_test_data or self.serial_thread_running:
+                    self.voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
 
-        # 更新图表数据和电压标签
-        for i in range(8):
-            voltage = values[i]
+            # 触摸点检测和像素地图更新
+            activated_rows = [i for i, signal in enumerate(row_signals) if signal > self.touch_threshold]
+            activated_cols = [i for i, signal in enumerate(col_signals) if signal > self.touch_threshold]
 
-            # 将新数据点添加到 deque 中，deque 会自动处理 maxlen
-            self.data_queues[i].append((voltage, current_time_s))
+            if len(activated_rows) == 1 and len(activated_cols) == 1:
+                touched_row = activated_rows[0]
+                touched_col = activated_cols[0]
+                self.update_pixel_map_signal.emit(touched_row, touched_col)
+                if self.data_queues[0]:
+                    touch_time = self.data_queues[0][-1][1]
+                    self.update_digital_matrix_signal.emit(touched_row, touched_col, touch_time)
 
-            # 提取用于绘图的 x (时间) 和 y (电压) 数据
-            plot_times = [item[1] for item in self.data_queues[i]]
-            plot_voltages = [item[0] for item in self.data_queues[i]]
+            # 记录最后更新时间
+            self._last_update_time = time.time()
+            
+        except Exception as e:
+            print(f"图表更新错误: {e}")
+            
+            # 初始化开始时间
+            if self.data_acquisition_start_time is None:
+                self.data_acquisition_start_time = current_time_s
 
-            # 更新数据线条
-            self.data_lines[i].setData(plot_times, plot_voltages)
+            # 限制数据队列大小
+            max_points = 1000  # 最多保留1000个数据点
+            for i in range(8):
+                if len(self.data_queues[i]) > max_points:
+                    self.data_queues[i] = self.data_queues[i][-max_points:]
 
-            # 如果数据正在主动生成，更新电压标签
-            if self.is_generating_test_data or self.serial_thread_running: # 需要从 MainWindow 更新 serial_thread_running 标志
-                self.voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
+            # 批量处理数据更新
+            row_signals = values[:4]
+            col_signals = values[4:]
+            
+            # 使用局部变量减少属性访问
+            plot_widgets = self.plot_widgets
+            data_lines = self.data_lines
+            voltage_labels = self.voltage_labels
+            
+            for i in range(8):
+                voltage = values[i]
+                self.data_queues[i].append((voltage, current_time_s))
+                
+                # 仅当需要显示时才提取数据
+                if i < len(data_lines):
+                    plot_data = self.data_queues[i]
+                    data_lines[i].setData(
+                        [item[1] for item in plot_data],
+                        [item[0] for item in plot_data]
+                    )
+                    
+                # 更新电压标签
+                if self.is_generating_test_data or self.serial_thread_running:
+                    voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
+
+            # 记录最后更新时间
+            self._last_update_time = time.time()
 
         # 如果需要，自动调整所有图表的 X 轴范围
         if self.data_queues and self.data_queues[0]:
@@ -416,6 +483,9 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             self.voltage_labels[i].setText(f"CH{i+1}: 0.000 V")
         # 重置数据采集开始时间
         self.data_acquisition_start_time = None
+        # 重置 MainWindow 中的时间偏移量
+        if self.main_window:
+            self.main_window.last_time_offset = 0.0
         # 可选：重置图表 X 轴，或保持原样
         # 可以调用此方法重置缩放/平移
         # self._reset_plot_views()

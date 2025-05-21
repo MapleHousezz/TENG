@@ -8,6 +8,7 @@
 #
 
 import sys
+from PyQt5 import QtCore  # 添加QtCore导入
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, QComboBox, QStatusBar, QMenuBar, QMenu, QAction, QMessageBox, QFileDialog
 from PyQt5.QtCore import QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QIcon # 导入 QIcon
@@ -26,17 +27,18 @@ class MainWindow(QMainWindow):
     """主窗口类，设置 UI 并协调 PlotManager 和 SerialManager。"""
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("TENG阵列多通道信号检测系统_V1.1") # 设置窗口标题
-        self.setGeometry(0, 0, 1920, 1080) # 设置窗口位置和大小
+        self.setWindowTitle("TENG阵列多通道信号检测系统_V1.1")
+        self.setGeometry(0, 0, 1920, 1080)
 
-        self.serial_thread = None # 串口线程实例
-        self.plot_widgets = [] # 图表控件列表
-        self.data_lines = [] # 数据线条
-        self.data_queues = [[] for _ in range(8)] # 每个通道一个数据队列 (电压, 时间_s)
-        # self.max_data_points = 1000 # 图表上显示的最大数据点数 (已在 PlotManager 中移除)
-        self.hover_texts = [] # 用于存储每个图表的悬停文本对象
-        self.is_synchronizing_x = False # 标志，防止 X 轴递归同步
-        self.sample_interval_s = 0.001 # 采样间隔，秒 (对应1ms)
+        self.serial_thread = None
+        self.plot_widgets = []
+        self.data_lines = []
+        self.data_queues = [[] for _ in range(8)]
+        self.hover_texts = []
+        self.is_synchronizing_x = False
+        self.sample_interval_s = 0.001
+        self.start_time = None  # 全局开始时间
+        self.last_time_offset = 0.0  # 上次断开时的时间偏移
 
         self.test_data_timer = QTimer(self) # 新增测试数据定时器
 
@@ -44,6 +46,7 @@ class MainWindow(QMainWindow):
 
         # 创建 PlotManager 实例
         self.plot_manager = PlotManager(
+            self, # 传递 MainWindow 实例
             self.plot_widgets,
             self.data_lines,
             self.data_queues,
@@ -69,17 +72,19 @@ class MainWindow(QMainWindow):
             self.stopbits_combo,
             self.connect_button,
             self.disconnect_button,
-            self.status_bar # 将 status bar 引用传递给 SerialManager
+            self.status_bar,
+            self  # 传递MainWindow引用以访问时间信息
         )
 
         # 连接 SerialManager 信号
-        self.serial_manager.status_changed.connect(self.update_status_bar) # 连接状态改变信号
-        self.serial_manager.data_received.connect(self.plot_manager.update_plots) # 连接数据接收信号
+        # 使用QueuedConnection确保跨线程通信安全
+        self.serial_manager.status_changed.connect(self.update_status_bar, QtCore.Qt.QueuedConnection)
+        self.serial_manager.data_received.connect(self.plot_manager.update_plots, QtCore.Qt.QueuedConnection)
 
         # 连接 PlotManager 信号以更新像素地图
-        self.plot_manager.update_pixel_map_signal.connect(self.update_pixel_map) # 连接更新像素地图信号
+        self.plot_manager.update_pixel_map_signal.connect(self.update_pixel_map, QtCore.Qt.QueuedConnection)
         # 连接信号以更新数字矩阵
-        self.plot_manager.update_digital_matrix_signal.connect(self.update_digital_matrix) # 连接更新数字矩阵信号
+        self.plot_manager.update_digital_matrix_signal.connect(self.update_digital_matrix, QtCore.Qt.QueuedConnection)
 
 
         # 从 SerialManager 调用 populate_serial_ports

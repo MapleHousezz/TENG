@@ -1,3 +1,4 @@
+import time
 # serial_manager.py
 #
 # 文件功能说明:
@@ -17,7 +18,7 @@ class SerialManager(QObject):
     status_changed = pyqtSignal(str) # 串口状态改变时发出的信号
     data_received = pyqtSignal(list) # 假设数据以值列表的形式接收
 
-    def __init__(self, port_combo, baud_combo, flow_control_combo, parity_combo, databits_combo, stopbits_combo, connect_button, disconnect_button, status_bar):
+    def __init__(self, port_combo, baud_combo, flow_control_combo, parity_combo, databits_combo, stopbits_combo, connect_button, disconnect_button, status_bar, main_window=None):
         super().__init__()
         self.port_combo = port_combo
         self.baud_combo = baud_combo
@@ -27,9 +28,9 @@ class SerialManager(QObject):
         self.stopbits_combo = stopbits_combo
         self.connect_button = connect_button
         self.disconnect_button = disconnect_button
-        self.status_bar = status_bar # 需要状态栏引用来更新消息
-
-        self.serial_thread = None # 串口处理线程实例
+        self.status_bar = status_bar
+        self.main_window = main_window  # 保存MainWindow引用
+        self.serial_thread = None
 
     def populate_serial_ports(self):
         """填充可用串口到下拉框。"""
@@ -82,8 +83,20 @@ class SerialManager(QObject):
 
         flowcontrol = self.flow_control_combo.currentText() # 获取选定的流控制方式
 
+        # 获取并应用上次断开的时间偏移
+        current_time = time.time()
+        start_time_with_offset = current_time - self.main_window.last_time_offset if self.main_window else current_time
+
         # 创建并启动串口处理线程
-        self.serial_thread = SerialThread(port, baudrate, stopbits, databits, parity, flowcontrol)
+        self.serial_thread = SerialThread(
+            port,
+            baudrate,
+            stopbits,
+            databits,
+            parity,
+            flowcontrol,
+            start_time_with_offset  # 传递带有偏移的时间基准
+        )
         self.serial_thread.data_received.connect(self.data_received.emit) # 连接数据接收信号
         self.serial_thread.status_changed.connect(self.status_changed.emit) # 连接状态改变信号
         self.serial_thread.start() # 启动线程
@@ -104,13 +117,30 @@ class SerialManager(QObject):
     def disconnect_serial(self):
         """断开当前串口连接。"""
         if self.serial_thread and self.serial_thread.isRunning():
-            # 停止线程
-            self.serial_thread.stop()
-            # 关闭串口以中断读取操作
-            if self.serial_thread.serial_port and self.serial_thread.serial_port.is_open:
-                self.serial_thread.serial_port.close()
-            # 等待线程结束，确保安全退出
-            self.serial_thread.wait()
+            try:
+                # 在停止线程前保存当前时间偏移量
+                if self.main_window and hasattr(self.serial_thread, 'time_offset'):
+                    self.main_window.last_time_offset = self.serial_thread.time_offset
+                
+                # 停止线程并设置超时
+                self.serial_thread.stop()
+                
+                # 使用超时等待线程结束
+                if not self.serial_thread.wait(2000):  # 最多等待2秒
+                    self.serial_thread.terminate()  # 强制终止线程
+                    self.status_changed.emit("警告：串口线程强制终止") # 发出警告信号
+                
+                # 确保串口已关闭
+                if hasattr(self.serial_thread, 'serial_port') and self.serial_thread.serial_port:
+                    if self.serial_thread.serial_port.is_open:
+                        try:
+                            self.serial_thread.serial_port.close()
+                        except Exception as e:
+                            print(f"关闭串口时出错: {e}")
+            
+            except Exception as e:
+                print(f"断开串口时出错: {e}")
+                self.status_changed.emit(f"断开串口时出错: {e}")
 
         # 更新 UI 控件状态
         self.connect_button.setEnabled(True)
@@ -121,9 +151,6 @@ class SerialManager(QObject):
         self.databits_combo.setEnabled(True)
         self.parity_combo.setEnabled(True)
         self.flow_control_combo.setEnabled(True)
-        # 数据引擎和接口下拉框由 MainWindow 处理
-        # self.data_engine_combo.setEnabled(True)
-        # self.data_interface_combo.setEnabled(True)
         self.status_changed.emit("串口已断开") # 发出状态改变信号
 
     def is_connected(self):
