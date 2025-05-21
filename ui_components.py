@@ -66,15 +66,16 @@ def create_control_panel(parent):
     control_layout.addWidget(frequency_label) # 添加频率标签
     control_layout.addWidget(frequency_spinbox) # 添加频率微调框
 
-    points_label = QLabel("点数") # 点数标签
-    points_label.setFont(label_font) # 设置字体
-    points_spinbox = QSpinBox() # 点数微调框
-    points_spinbox.setRange(1, 100) # 设置范围
-    points_spinbox.setValue(10) # 设置默认值
-    points_spinbox.setFont(label_font) # 设置字体
-    points_spinbox.setMinimumHeight(40) # 设置最小高度
-    control_layout.addWidget(points_label) # 添加点数标签
-    control_layout.addWidget(points_spinbox) # 添加点数微调框
+    # --- 测试数据持续时间 --- #
+    duration_label = QLabel("持续时间 (秒)") # 持续时间标签
+    duration_label.setFont(label_font) # 设置字体
+    duration_spinbox = QSpinBox() # 持续时间微调框
+    duration_spinbox.setRange(1, 3600) # 设置范围 (1秒到1小时)
+    duration_spinbox.setValue(10) # 设置默认值
+    duration_spinbox.setFont(label_font) # 设置字体
+    duration_spinbox.setMinimumHeight(40) # 设置最小高度
+    control_layout.addWidget(duration_label) # 添加持续时间标签
+    control_layout.addWidget(duration_spinbox) # 添加持续时间微调框
 
     control_layout.addWidget(protocol_connection_label) # 添加协议与连接标签
 
@@ -86,6 +87,7 @@ def create_control_panel(parent):
     data_engine_combo.addItems(["JustFloat"]) # 添加选项
     data_engine_combo.setCurrentText("JustFloat") # 设置当前文本
     data_engine_combo.setFont(label_font) # 设置字体
+
     data_engine_combo.setMinimumHeight(40) # 设置最小高度
     data_engine_layout.addWidget(data_engine_label) # 添加标签
     data_engine_layout.addStretch() # 添加伸展空间
@@ -111,6 +113,7 @@ def create_control_panel(parent):
     serial_params_label.setFont(get_font(16, bold=True)) # 设置字体
     serial_params_label.setStyleSheet("color: #1E90FF;") # 设置样式
     control_layout.addWidget(serial_params_label) # 添加标签
+
 
     serial_group = QWidget() # 串口参数分组
     serial_layout = QGridLayout(serial_group) # 串口参数网格布局
@@ -139,6 +142,7 @@ def create_control_panel(parent):
     serial_layout.addWidget(flow_control_label, 3, 0) # 添加标签到布局
     flow_control_combo = QComboBox() # 数据流控下拉框
     flow_control_combo.addItems(["None", "RTS/CTS", "XON/XOFF"]) # 添加选项
+
     flow_control_combo.setCurrentText("None") # 设置当前文本
     flow_control_combo.setFont(label_font) # 设置字体
     flow_control_combo.setMinimumHeight(40) # 设置最小高度
@@ -165,6 +169,7 @@ def create_control_panel(parent):
     serial_layout.addWidget(databits_combo, 5, 1) # 添加下拉框到布局
 
     stopbits_label = QLabel("停止位数") # 停止位数标签
+
     stopbits_label.setFont(label_font) # 设置字体
     serial_layout.addWidget(stopbits_label, 6, 0) # 添加标签到布局
     stopbits_combo = QComboBox() # 停止位数下拉框
@@ -193,6 +198,7 @@ def create_control_panel(parent):
     test_data_button = QPushButton("生成测试数据") # 生成测试数据按钮
     test_data_button.setFont(button_font) # 设置字体
     test_data_button.setMinimumHeight(48) # 设置最小高度
+
     action_buttons_layout.addWidget(test_data_button, 1, 0, 1, 2) # 添加按钮到布局，跨两列
 
     reset_view_button = QPushButton("复位图表") # 复位图表按钮
@@ -231,7 +237,7 @@ def create_control_panel(parent):
         'clear_data_button': clear_data_button,
         'export_data_button': export_data_button,
         'frequency_spinbox': frequency_spinbox, # 添加频率微调框
-        'points_spinbox': points_spinbox # 添加点数微调框
+        'duration_spinbox': duration_spinbox, # 添加持续时间微调框
     }
 
 def create_data_display_area(parent):

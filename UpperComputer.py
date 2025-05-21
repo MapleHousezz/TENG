@@ -55,7 +55,6 @@ class MainWindow(QMainWindow):
             self.test_data_timer,
             self.pixel_labels, # 将 pixel_labels 传递给 PlotManager
             self.frequency_spinbox, # 将 frequency spinbox 传递给 PlotManager
-            self.points_spinbox, # 将 points spinbox 传递给 PlotManager
             self.digital_matrix_labels # 将 digital matrix labels 传递给 PlotManager
         )
 
@@ -144,7 +143,7 @@ class MainWindow(QMainWindow):
         self.clear_data_button = control_components['clear_data_button']
         self.export_data_button = control_components['export_data_button']
         self.frequency_spinbox = control_components['frequency_spinbox'] # 获取频率微调框
-        self.points_spinbox = control_components['points_spinbox'] # 获取点数微调框
+        self.duration_spinbox = control_components['duration_spinbox'] # 获取持续时间微调框
 
         # --- 数据显示区域 --- #
         data_display_components = create_data_display_area(self) # 创建数据显示区域

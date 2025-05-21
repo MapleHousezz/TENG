@@ -21,7 +21,7 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
     update_pixel_map_signal = pyqtSignal(int, int) # 发送触摸像素的行和列的信号
     update_digital_matrix_signal = pyqtSignal(int, int, float) # 发送行、列和时间的信号
 
-    def __init__(self, main_window, plot_widgets, data_lines, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, points_spinbox, digital_matrix_labels): # 添加 main_window 和 digital_matrix_labels 参数
+    def __init__(self, main_window, plot_widgets, data_lines, voltage_labels, sample_interval_s, test_data_button, status_bar, test_data_timer, pixel_labels, frequency_spinbox, digital_matrix_labels): # 添加 main_window 和 digital_matrix_labels 参数
         super().__init__() # 调用 QObject 构造函数
         self.main_window = main_window # 保存 MainWindow 引用
         self.plot_widgets = plot_widgets
@@ -37,8 +37,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         self.test_data_timer = test_data_timer
         self.pixel_labels = pixel_labels # 存储 pixel_labels 引用
         self.frequency_spinbox = frequency_spinbox # 存储 frequency spinbox 引用
-        self.points_spinbox = points_spinbox # 存储 points spinbox 引用
         self.digital_matrix_labels = digital_matrix_labels # 存储 digital matrix labels 引用
+        self.duration_spinbox = None # 持续时间微调框，将在 toggle_test_data_generation 中获取
 
         self.is_synchronizing_x = False # 标志，防止 X 轴递归同步
 
@@ -46,9 +46,7 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
 
         # 测试数据生成控制变量
         self.is_generating_test_data = False
-        self.test_data_total_points = 0
         self.test_data_frequency_hz = 1 # 默认频率 (Hz)
-        self.test_data_points = 4 # 默认点数
 
         # 需要 MainWindow 中的标志/对象引用来检查数据源状态
         self.serial_thread_running = False # 需要从 MainWindow 更新此标志
@@ -96,7 +94,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
                         self._last_data = self.full_data[i][-1]
                     
                 # 更新电压标签
-                if self.is_generating_test_data or self.serial_thread_running:
+                # 检查是否正在生成测试数据或串口线程正在运行
+                if self.is_generating_test_data or (self.main_window and self.main_window.serial_manager and self.main_window.serial_manager.serial_thread is not None):
                     self.voltage_labels[i].setText(f"CH{i+1}: {voltage:.3f} V")
 
             # 触摸点检测和像素地图更新
@@ -184,8 +183,8 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             # 发出信号更新像素地图
             self.update_pixel_map_signal.emit(touched_row, touched_col)
             # 发出信号更新数字矩阵，包含最后一个数据点的时间
-            if self.display_data[0]: # 使用第一个通道的时间作为参考
-                 touch_time = self.display_data[0][-1][1]
+            if self.full_data[0]: # 使用第一个通道的时间作为参考
+                 touch_time = self.full_data[0][-1][1]
                  self.update_digital_matrix_signal.emit(touched_row, touched_col, touch_time)
 
         # 没有触摸或多点触摸 - 不在此处清除像素地图或数字矩阵
@@ -193,10 +192,6 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
 
 
     def _generate_single_test_data_point(self):
-        import random
-        import math
-        import time
-
         # 生成一组模拟数据
         test_values = []
 
@@ -236,20 +231,26 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
         # 增加生成的总点数
         self.test_data_total_points += 1
 
-        # 在更新图表后检查是否达到目标点数
-        if self.test_data_total_points >= self.test_data_points:
-            self.test_data_timer.stop()
-            self.is_generating_test_data = False
-            self.test_data_button.setText("生成测试数据")
-            self.status_bar.showMessage(f"测试数据采集完成 ({self.test_data_points} 点)")
-            # 最后一个点的像素地图和数字矩阵更新由 update_plots 处理
+        # 检查是否达到了持续时间限制
+        if hasattr(self, 'test_data_start_time') and self.duration_spinbox:
+            elapsed_time = time.time() - self.test_data_start_time
+            duration_seconds = self.duration_spinbox.value()
+            
+            # 如果已经超过了设定的持续时间，自动停止数据生成
+            if elapsed_time >= duration_seconds:
+                self._stop_test_data_generation()
+                self.status_bar.showMessage(f"测试数据采集已完成 (持续时间: {duration_seconds} 秒)")
 
 
     def toggle_test_data_generation(self):
         if not self.is_generating_test_data:
-            # 从微调框获取频率 (Hz) 和点数
+            # 从微调框获取频率 (Hz)
             frequency_hz = self.frequency_spinbox.value()
-            self.test_data_points = self.points_spinbox.value()
+            
+            # 获取持续时间 (秒)
+            # 从 MainWindow 获取 duration_spinbox
+            self.duration_spinbox = self.main_window.duration_spinbox
+            duration_seconds = self.duration_spinbox.value() if self.duration_spinbox else 10
 
             # 从频率 (Hz) 计算定时器间隔 (ms)
             if frequency_hz > 0:
@@ -257,36 +258,37 @@ class PlotManager(QObject): # 继承自 QObject 以使用信号/槽
             else:
                 timer_interval_ms = 1000 # 如果频率小于等于 0，默认为 1 Hz
 
-            # 重置总点数计数器
+            # 重置总点数计数器和开始时间
             self.test_data_total_points = 0
-
-            # 设置测试数据采样间隔 (基于定时器间隔)
-            # 不再需要，因为我们使用实时时间
-            # self.sample_interval_s = timer_interval_ms / 1000.0
+            self.test_data_start_time = time.time()
 
             # 开始生成数据
             self.is_generating_test_data = True # 更新 PlotManager 中的标志
             # 在连接之前断开任何先前的连接
             try:
                 self.test_data_timer.timeout.disconnect(self._generate_single_test_data_point)
-            except TypeError:
-                pass # 如果未连接则忽略
+            except TypeError: # 如果未连接则忽略
+                pass
             self.test_data_timer.timeout.connect(self._generate_single_test_data_point)
             self.test_data_timer.start(timer_interval_ms) # 使用计算出的间隔
 
             self.test_data_button.setText("停止生成")
-            self.status_bar.showMessage(f"测试数据采集中 ({frequency_hz} Hz, 共 {self.test_data_points} 点)...")
+            self.status_bar.showMessage(f"测试数据采集中 ({frequency_hz} Hz, {duration_seconds} 秒)...")
         else:
             # 手动停止生成数据
-            self.test_data_timer.stop()
-            try:
-                self.test_data_timer.timeout.disconnect(self._generate_single_test_data_point)
-            except TypeError:
-                pass # 如果未连接则忽略
-            self.is_generating_test_data = False # 更新 PlotManager 中的标志
-            self.test_data_button.setText("生成测试数据")
-            self.status_bar.showMessage("测试数据采集已停止")
-            # 不要在此处清除像素地图或数字矩阵。它们应该保留直到用户清除。
+            self._stop_test_data_generation()
+            
+    def _stop_test_data_generation(self):
+        """停止测试数据生成"""
+        self.test_data_timer.stop()
+        try:
+            self.test_data_timer.timeout.disconnect(self._generate_single_test_data_point)
+        except TypeError: # 如果未连接则忽略
+            pass
+        self.is_generating_test_data = False # 更新 PlotManager 中的标志
+        self.test_data_button.setText("生成测试数据")
+        self.status_bar.showMessage("测试数据采集已停止")
+        # 不要在此处清除像素地图或数字矩阵。它们应该保留直到用户清除。
 
 
     def export_data_to_csv(self):
