@@ -12,6 +12,7 @@ import serial.tools.list_ports
 from PyQt5.QtWidgets import QComboBox, QPushButton, QMessageBox, QStatusBar
 from PyQt5.QtCore import pyqtSignal, QObject
 from serial_handler import SerialThread # 假设 SerialThread 在 serial_handler.py 中
+from ui.serial_utils import populate_serial_ports # 导入 populate_serial_ports
 
 class SerialManager(QObject):
     # 定义将连接到 MainWindow 的信号
@@ -31,16 +32,7 @@ class SerialManager(QObject):
         self.status_bar = status_bar
         self.main_window = main_window  # 保存MainWindow引用
         self.serial_thread = None
-
-    def populate_serial_ports(self):
-        """填充可用串口到下拉框。"""
-        ports = serial.tools.list_ports.comports() # 获取可用串口列表
-        self.port_combo.clear() # 清空下拉框
-        for port in ports:
-            self.port_combo.addItem(port.device) # 添加串口设备名称
-        if not ports:
-            self.port_combo.addItem("无可用串口") # 如果没有可用串口，显示提示
-            self.connect_button.setEnabled(False) # 禁用连接按钮
+        populate_serial_ports(self.port_combo) # 调用导入的 populate_serial_ports 函数
 
     def connect_serial(self):
         """连接到选定的串口。"""

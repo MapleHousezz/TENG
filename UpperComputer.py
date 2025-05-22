@@ -19,7 +19,11 @@ import struct
 import time
 import csv
 import os # 用于导出路径拼接
-from ui_components import create_control_panel, create_data_display_area, create_menu_bar, create_status_bar, create_pixel_map_area # 导入 create_pixel_map_area
+from ui.control_panel_ui import create_control_panel
+from ui.data_display_ui import create_data_display_area
+from ui.menu_bar_ui import create_menu_bar
+from ui.status_bar_ui import create_status_bar
+from ui.pixel_map_ui import create_pixel_map_area
 from plot_manager import PlotManager
 from serial_manager import SerialManager
 
@@ -84,8 +88,6 @@ class MainWindow(QMainWindow):
 
 
         # 从 SerialManager 调用 populate_serial_ports
-        self.serial_manager.populate_serial_ports() # 填充可用串口
-
         # 将所有图表控件的 X 轴链接到第一个图表，以实现同步
         if self.plot_widgets:
             first_view_box = self.plot_widgets[0].getViewBox() # 获取第一个图表的 ViewBox
