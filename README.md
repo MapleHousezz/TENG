@@ -2,13 +2,13 @@
 
 ## 项目简介
 
-这是一个基于 PyQt5 开发的上位机软件，用于TENG（摩擦纳米发电机）阵列的多通道信号检测。软件能够通过串口与硬件设备通信，实时采集多通道电压信号，并在图表中进行可视化显示。此外，软件还具备触摸点检测、像素地图和数字矩阵显示、测试数据生成以及数据导出等功能。
+这是一个基于 PyQt5 开发的上位机软件，用于 TENG（摩擦纳米发电机）阵列的多通道信号检测。软件能够通过串口与硬件设备通信，实时采集多通道电压信号，并在图表中进行可视化显示。此外，软件还具备触摸点检测、像素地图和数字矩阵显示、测试数据生成以及数据导出等功能。
 
 ## 主要功能
 
-*   **多通道信号采集**: 通过串口实时接收来自TENG阵列的电压信号。
+*   **多通道信号采集**: 通过串口实时接收来自 TENG 阵列的电压信号。
 *   **实时图表显示**: 使用 PyQtGraph 库将多通道电压信号以波形图的形式实时显示。
-*   **触摸点检测**: 根据接收到的信号，检测TENG阵列上的触摸点。
+*   **触摸点检测**: 根据接收到的信号，检测 TENG 阵列上的触摸点。
 *   **像素地图显示**: 在图形界面上以像素地图的形式直观显示触摸点的位置。
 *   **数字矩阵显示**: 显示触摸点相关的数字信息（例如，触摸发生的时间）。
 *   **测试数据生成**: 提供生成模拟测试数据的功能，方便在没有硬件的情况下进行软件测试。
@@ -31,7 +31,7 @@ pip install -r requirements.txt
 
 ## 使用方法
 
-1.  **连接硬件**: 将TENG阵列硬件设备通过串口连接到电脑。
+1.  **连接硬件**: 将 TENG 阵列硬件设备通过串口连接到电脑。
 2.  **运行软件**: 在项目根目录下运行主程序文件：
     ```bash
     python UpperComputer.py
@@ -45,15 +45,46 @@ pip install -r requirements.txt
 
 ## 文件结构
 
-*   `UpperComputer.py`: 主程序文件，包含主窗口类和UI设置。
-*   `serial_manager.py`: 负责管理串口连接和配置。
-*   `serial_handler.py`: （假设存在）处理底层的串口数据读写。
-*   `plot_manager.py`: 负责图表数据管理、更新和触摸点检测。
-*   `ui_components.py`: （假设存在）包含用于构建UI界面的组件函数。
-*   `requirements.txt`: 项目依赖列表。
-*   `README.md`: 项目自述文件（当前文件）。
-*   `icon.ico`: 软件图标文件。
-*   其他可能的二进制文件或文档。
+### 主程序文件
+- [`UpperComputer.py`](UpperComputer.py): 主窗口类 `MainWindow` 定义了 UI 并协调 `PlotManager` 和 `SerialManager`。
+
+### 核心模块
+#### 串口管理
+- [`serial_manager.py`](serial_manager.py): 包含 `SerialManager` 类，负责串口连接、配置及状态管理。
+- [`serial_handler.py`](serial_handler.py): 提供 `SerialThread` 线程类，用于异步读取串口数据。
+
+#### 图表管理
+- [`plot_manager.py`](plot_manager.py): 包含 `PlotManager` 类，负责管理图表更新、触摸点检测以及测试数据生成等功能。
+
+### UI 模块
+位于 `ui/` 子目录下：
+- 控制面板 (`control_panel_ui.py`)
+- 数据显示 (`data_display_ui.py`)
+- 菜单栏 (`menu_bar_ui.py`)
+- 像素地图 (`pixel_map_ui.py`)
+- 状态栏 (`status_bar_ui.py`)
+
+### 辅助模块
+位于 `modules/` 子目录下：
+- 数据导出 (`data_exporter.py`)
+- 数据管理 (`data_manager.py`)
+- 图表同步 (`plot_synchronizer.py`)
+- 图表更新器 (`plot_updater.py`)
+- 测试数据生成器 (`test_data_generator.py`)
+- 触摸检测器 (`touch_detector.py`)
+
+## 技术栈
+- **语言**: Python
+- **框架/库**:
+  - `PyQt5`: 构建图形用户界面
+  - `pyqtgraph`: 高性能绘图
+  - `numpy`: 数据处理
+  - `pyserial`: 串口通信
+
+## 改进建议
+1. **文档**: 当前 README 文件提供了良好的基础信息，但可以进一步补充每个模块的具体接口说明和设计意图。
+2. **单元测试**: 添加针对核心功能的单元测试，确保长期维护中的稳定性。
+3. **异常处理**: 在关键逻辑（如串口通信和数据解析）中增加更详细的错误日志记录。
 
 ## 作者
 
